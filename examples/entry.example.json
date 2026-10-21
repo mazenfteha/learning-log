@@ -1,0 +1,118 @@
+{
+  "schema_version": 1,
+  "task": {
+    "id": "LOY-214",
+    "title": "Take loyalty points back when an order is refunded",
+    "project": "loyalty-api",
+    "repo": "github.com/acme/loyalty-api",
+    "branch": "feature/LOY-214-refund-points",
+    "stack": ["PHP", "Laravel", "PostgreSQL", "Stripe webhooks"],
+    "layers": ["business_logic", "architecture"],
+    "risk": "high",
+    "how_it_works": "When Stripe sends charge.refunded, RefundOrderPoints writes a negative refund_reversal row to points_ledger that links back to the order. A balance is never a number I edit: PointsBalance::for() sums the member's ledger rows. A partial refund reverses points in proportion to the refunded amount, rounded down. If the member already spent those points, the reversal stops at their current balance and the rest is stored on the row as unrecovered_points for finance.",
+    "surprised_me": "Tiers read lifetime earned points, not the current balance. So a refund lowers my member's balance but never drops them from Gold to Silver.",
+    "would_bite_again": "Stripe retries webhooks and can send the same refund twice. Only the unique index on points_ledger.source_refund_id stops a second reversal; a check in PHP alone races when two workers pick up the retries together.",
+    "created_at": "2026-10-14T16:20:00+00:00"
+  },
+  "decisions": [
+    {
+      "title": "Reverse points with a ledger row, not by editing the balance",
+      "chosen": "Insert a negative refund_reversal row in points_ledger, linked to the order and the Stripe refund.",
+      "rejected": [
+        "UPDATE members.points_balance directly",
+        "Soft-delete the original earn row"
+      ],
+      "why": "The ledger stays append-only, so support can see why a balance changed and finance can reconcile per order. Soft-deleting the earn row would hide points that were already spent.",
+      "kind": "architecture",
+      "reversible": false,
+      "files": [
+        "app/Points/RefundOrderPoints.php",
+        "app/Points/PointsBalance.php"
+      ],
+      "impact": "Every balance read is a SUM over the ledger, so the member_id index on points_ledger has to stay."
+    },
+    {
+      "title": "Stop the reversal at zero instead of allowing a negative balance",
+      "chosen": "Reverse at most the member's current balance and record the shortfall as unrecovered_points.",
+      "rejected": [
+        "Allow negative balances and block redemptions until they are paid back",
+        "Hold the refund until the member returns the points"
+      ],
+      "why": "Product's rule is that loyalty points never block a refund, and negative balances confused members in the old app.",
+      "kind": "product",
+      "reversible": true,
+      "files": ["app/Points/RefundOrderPoints.php"],
+      "impact": "A member who spends points and then refunds keeps that value. Finance sees it in unrecovered_points."
+    },
+    {
+      "title": "Make the refund webhook idempotent with a unique index",
+      "chosen": "Add a unique index on points_ledger.source_refund_id and treat a duplicate-key error as already handled.",
+      "rejected": [
+        "A Redis lock around the webhook handler",
+        "Check for an existing row in PHP before inserting"
+      ],
+      "why": "The database enforces it across all queue workers. A check-then-insert in PHP lets two retries both pass the check.",
+      "kind": "architecture",
+      "reversible": true,
+      "files": [
+        "database/migrations/2026_10_14_120000_add_refund_columns_to_points_ledger.php",
+        "app/Http/Controllers/StripeWebhookController.php"
+      ]
+    },
+    {
+      "title": "Leave tier downgrades on refund for later",
+      "chosen": "Tiers keep using lifetime earned points; a refund does not change a member's tier for now.",
+      "rejected": ["Recalculate the tier on every refund"],
+      "why": "Downgrading mid-year needs a product rule and a member email that don't exist yet. Tracked as LOY-231.",
+      "kind": "deferred",
+      "reversible": true,
+      "files": ["app/Tiers/TierCalculator.php"]
+    }
+  ],
+  "questions": [
+    {
+      "asked": "Make refunds take the points back from the member.",
+      "should_have_asked": "What should happen to points on a partial refund, and when the member has already spent them?",
+      "rating": 3,
+      "feedback": "I pointed straight at StripeWebhookController, which saved time. I didn't mention partial refunds, so the first version took back all 200 points for a $10 refund on a $100 order and had to be redone."
+    },
+    {
+      "asked": "Is this safe if Stripe sends the same webhook twice?",
+      "should_have_asked": "Show me the test that replays the same refund webhook twice and checks the balance.",
+      "rating": 5,
+      "feedback": "Asking about retries before merging caught a double-reversal bug. Next time I'll ask for the test that proves it, not only the explanation."
+    }
+  ],
+  "quiz": [
+    {
+      "type": "predict",
+      "question": "A member earned 200 points on a $100 order, spent 150 of them, then gets a $50 refund. What happens to their points?",
+      "answer": "Half the order is refunded, so 100 points should go back. Their balance is only 50, so 50 are reversed, 50 are stored as unrecovered_points, and the balance ends at 0.",
+      "file": "app/Points/RefundOrderPoints.php"
+    },
+    {
+      "type": "why",
+      "question": "Why does a refund add a ledger row instead of lowering points_balance?",
+      "answer": "The ledger is append-only, so every change to a balance has a row that says why and which order caused it. Editing the number would lose that history and break finance reconciliation.",
+      "file": "app/Points/PointsBalance.php"
+    },
+    {
+      "type": "where",
+      "question": "What stops a retried refund webhook from taking the points back twice?",
+      "answer": "The unique index on points_ledger.source_refund_id. The second insert fails with a duplicate-key error, and the webhook controller treats that as already handled.",
+      "file": "database/migrations/2026_10_14_120000_add_refund_columns_to_points_ledger.php"
+    },
+    {
+      "type": "trap",
+      "question": "A member refunds the order that got them to Gold. Do they drop back to Silver?",
+      "answer": "No. TierCalculator reads lifetime earned points, which a refund doesn't change. Downgrading on refund is deferred to LOY-231.",
+      "file": "app/Tiers/TierCalculator.php"
+    }
+  ],
+  "code": {
+    "file": "app/Points/RefundOrderPoints.php",
+    "before": "$member->points_balance -= $order->points_earned;\n$member->save();",
+    "after": "$points = intdiv($order->points_earned * $refund->amount, $order->total);\n$reversed = min($points, PointsBalance::for($member));\nPointsLedger::create([\n    'member_id' => $member->id,\n    'entry_type' => 'refund_reversal',\n    'points' => -$reversed,\n    'unrecovered_points' => $points - $reversed,\n    'source_refund_id' => $refund->id,\n]);",
+    "note": "The balance is no longer edited in place; a partial refund reverses a share of the points and never goes below zero."
+  }
+}

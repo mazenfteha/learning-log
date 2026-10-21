@@ -11,7 +11,7 @@ Turn this session into a lesson the developer only has to read. You write everyt
 
 Paths used below:
 
-- `STORE` means `<python> "${CLAUDE_SKILL_DIR}/../../scripts/store.py"`, where `<python>` is found in step 4. Always keep the quotes: on Windows the path has backslashes.
+- `STORE` means `<python> "${CLAUDE_SKILL_DIR}/../../scripts/store.py"`, where `<python>` is found at the start of step 3. Always keep the quotes: on Windows the path has backslashes.
 - The entry contract is `${CLAUDE_SKILL_DIR}/../../schema/entry.schema.json`. A complete good entry is `${CLAUDE_SKILL_DIR}/../../examples/entry.example.json`. Read the example once before drafting if you haven't seen it in this session.
 
 ## 1. Gather the session
@@ -34,6 +34,8 @@ Log only if there is something worth taking away: a business rule, a non-obvious
 If the session was trivial (renames, formatting, typos, copy changes, routine dependency bumps), reply with one line, `Nothing worth logging: <reason>.`, and stop. An empty log is better than a padded one.
 
 ## 3. Draft the entry
+
+First find Python: run `python3 --version`, then `python --version`, then `py -3 --version`, and stop at the first that prints `Python 3.`. That command is `<python>`. On Windows, `python3` and `python` are often Store stubs that print "Python was not found"; that counts as a failure.
 
 Write one JSON object that follows the schema. Set `schema_version` to 1. Do not write `review`, `created_at` or `updated_at`; `store.py` manages them.
 
@@ -76,15 +78,11 @@ Before saving, check the draft against these points:
 - Every quiz file is real.
 - Nothing in it could have been written without seeing this session.
 
-## 4. Find Python
-
-Run `python3 --version`, then `python --version`, then `py -3 --version`, and stop at the first one that prints `Python 3.`. That command is `<python>`. On Windows, `python3` and `python` are often Store stubs that print "Python was not found", which counts as a failure.
-
-## 5. Write the draft
+## 4. Write the draft
 
 Run `STORE home`. It prints `tmp: <dir>` and creates that folder. Write the entry with the Write tool to `<dir>/<task-id>.json`.
 
-## 6. Save
+## 5. Save
 
 Run `STORE save "<dir>/<task-id>.json"`.
 
@@ -92,7 +90,7 @@ Run `STORE save "<dir>/<task-id>.json"`.
 - **It prints errors.** Each one names the exact field (for example `quiz[2].file: required field is missing`). Fix only those fields, rewrite the file and run save once more. For a secret error, remove or describe the value; never repeat it.
 - **It fails again.** Show the errors and the draft path, then stop.
 
-## 7. Reply
+## 6. Reply
 
 Reply in one or two lines, based on the save output. Say what was logged and give the Markdown path. For example:
 

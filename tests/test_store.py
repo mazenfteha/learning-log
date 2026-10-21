@@ -75,6 +75,15 @@ class SaveAndRenderTests(StoreTestCase):
         self.assertIn("<details><summary>Answer</summary>", markdown)
         self.assertIn("Proof: `app/Tiers/TierCalculator.php`", markdown)
         self.assertIn("```php", markdown)
+        self.assertIn("- **Repo:** github.com/acme/loyalty-api", markdown)
+        self.assertIn("- **Branch:** `feature/LOY-214-refund-points`", markdown)
+
+    def test_entry_without_repo_shows_branch_only(self):
+        entry = example()
+        entry["task"]["repo"] = None
+        markdown = self.save(entry)["md"].read_text(encoding="utf-8")
+        self.assertNotIn("**Repo:**", markdown)
+        self.assertIn("- **Branch:** `feature/LOY-214-refund-points`", markdown)
 
     def test_new_entry_without_created_at_is_due_three_days_from_now(self):
         entry = example()
@@ -304,6 +313,11 @@ class CliTests(StoreTestCase):
         saved = self.run_cli("save", str(EXAMPLE))
         self.assertEqual(saved.returncode, 0, saved.stderr)
         self.assertIn("saved LOY-214 (new: +4 decisions, +2 questions, +4 quiz)", saved.stdout)
+
+        one_more = example()
+        one_more["questions"] = [dict(one_more["questions"][0], asked="One more request")]
+        updated = self.run_cli("save", str(self.write_draft(one_more)))
+        self.assertIn("saved LOY-214 (updated: +0 decisions, +1 question, +0 quiz)", updated.stdout)
         self.assertIn("LOY-214.md", saved.stdout)
 
         again = self.run_cli("save", str(EXAMPLE))

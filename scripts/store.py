@@ -583,11 +583,10 @@ def render_markdown(entry):
 
     lines.append("- **Task:** `%s`" % task["id"])
     lines.append("- **Project:** " + task["project"])
-    if task.get("repo") or task.get("branch"):
-        where = task.get("repo") or ""
-        if task.get("branch"):
-            where = (where + " " if where else "") + "(branch `%s`)" % task["branch"]
-        lines.append("- **Repo:** " + where)
+    if task.get("repo"):
+        lines.append("- **Repo:** " + task["repo"])
+    if task.get("branch"):
+        lines.append("- **Branch:** `%s`" % task["branch"])
     lines.append("- **Stack:** " + ", ".join(task["stack"]))
     lines.append("- **Layers:** " + ", ".join(layer.replace("_", " ") for layer in task["layers"]))
     lines.append("- **Risk:** " + task["risk"])
@@ -686,14 +685,19 @@ def _cmd_save(args):
     if result["status"] == "unchanged":
         detail = "unchanged"
     else:
-        detail = "%s: +%d decisions, +%d questions, +%d quiz" % (
-            result["status"], added["decisions"], added["questions"], added["quiz"])
+        detail = "%s: +%s, +%s, +%d quiz" % (
+            result["status"], _plural(added["decisions"], "decision"),
+            _plural(added["questions"], "question"), added["quiz"])
     for note in result["notes"]:
         print(note, file=sys.stderr)
     print("saved %s (%s)" % (result["id"], detail))
     print("json: %s" % result["json"])
     print("md:   %s" % result["md"])
     return 0
+
+
+def _plural(count, noun):
+    return "%d %s%s" % (count, noun, "" if count == 1 else "s")
 
 
 def _cmd_validate(args):

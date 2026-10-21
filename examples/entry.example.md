@@ -2,7 +2,8 @@
 
 - **Task:** `LOY-214`
 - **Project:** loyalty-api
-- **Repo:** github.com/acme/loyalty-api (branch `feature/LOY-214-refund-points`)
+- **Repo:** github.com/acme/loyalty-api
+- **Branch:** `feature/LOY-214-refund-points`
 - **Stack:** PHP, Laravel, PostgreSQL, Stripe webhooks
 - **Layers:** business logic, architecture
 - **Risk:** high

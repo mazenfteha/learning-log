@@ -67,7 +67,9 @@ Write one JSON object that follows the schema. Set `schema_version` to 1. Do not
 
 **code** (optional): the one before/after snippet that best shows the change, under 10 lines each. Only include it if it helps.
 
-**Style:** write in the developer's voice ("I", "my project"), with short sentences and plain words. Use real file, function, table and rule names. No filler such as "This session focused on…". Don't restate the diff line by line.
+**Style:** write in the developer's voice ("I", "my project") everywhere, including `feedback` ("I pointed at…", never "You pointed at…"). Use short sentences and plain words.
+
+**Facts:** state only what this session showed: code you read or ran, output you saw, docs you checked. A claim about how a tool or framework behaves that nobody verified ("there is no bare /log") becomes a wrong lesson that gets quizzed later. Leave it out, or say it's unverified. Use real file, function, table and rule names. No filler such as "This session focused on…". Don't restate the diff line by line.
 
 **Secrets:** never include API keys, tokens, passwords, `.env` values, connection strings or customer data. Describe them instead ("the Stripe secret from the environment").
 

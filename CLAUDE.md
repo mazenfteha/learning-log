@@ -112,6 +112,7 @@ Optional: `code` with one short `before`/`after` snippet (under 10 lines each).
 - Entries: `~/.learning-log/entries/<project>/<task-id>.json` and a rendered `<task-id>.md` next to it.
 - **Upsert by `task.id`.** Saving an entry with an existing id updates the task fields and adds new decisions, questions and quiz items, skipping any whose title or question text already exists. Re-running `/log` must never create duplicates.
 - **Review schedule.** New entries are due 3 days after creation. Later intervals: 3, 7, 14, 30, 60 days.
+- **Notion sync state:** `~/.learning-log/notion.json` holds the Notion page, database and view URLs, plus which entries and items were sent, with a hash of each task page. It is not part of the entry contract. Deleting it makes the next sync look for the existing "Learning Log" page and rebuild the map instead of duplicating.
 
 ## `store.py` commands
 
@@ -121,7 +122,12 @@ python3 scripts/store.py validate <entry.json>  # validate only, exit non-zero w
 python3 scripts/store.py list [--project P]     # one line per entry: date, project, title, due
 python3 scripts/store.py due [--project P]      # entries due for review today or earlier
 python3 scripts/store.py show <task-id>         # print the rendered Markdown
+python3 scripts/store.py home                   # print the storage root and the tmp dir for drafts
+python3 scripts/store.py notion-plan [task-id]  # next Notion MCP calls, with exact arguments, as JSON
+python3 scripts/store.py notion-record <file>   # record the URLs those calls returned
 ```
+
+Notion sync runs in rounds: `notion-plan` → the skill makes the listed calls verbatim → `notion-record`, until the plan says `done`. Each round only plans calls whose inputs are already recorded, so first-run setup, new pages and updates use the same loop.
 
 `reviewed <task-id>` comes in Phase 3.
 
@@ -146,8 +152,8 @@ Anti-patterns: restating the diff line by line; generic advice ("write tests"); 
 
 ## Phases
 
-1. **Local core (current).** Schema, example entry, `store.py` with tests, `/log` skill writing locally. Then tune lesson quality on real sessions.
-2. **Notion.** First-run setup creates a "Learning Log" page with three linked databases (Tasks, Decisions, Questions) via the Notion MCP. Upsert by task id. Views for "Review due" and "Tech debt" (decisions of kind `workaround` or `deferred`). Local JSON stays the source of truth.
+1. **Local core (done).** Schema, example entry, `store.py` with tests, `/log` skill writing locally. Then tune lesson quality on real sessions.
+2. **Notion (current).** First-run setup creates a "Learning Log" page with three linked databases (Tasks, Decisions, Questions) via the Notion MCP. Upsert by task id. Views for "Review due" and "Tech debt" (decisions of kind `workaround` or `deferred`). Local JSON stays the source of truth.
 3. **Review.** `/review` skill: due questions one at a time, press Enter to reveal, `store.py reviewed` schedules the next date.
 4. **Package.** Plugin manifest, marketplace file, README, evals (fires on real work, skips trivial sessions).
 5. **Later.** Session-end nudge, Cursor and Codex support, the Debrief game on the same data.

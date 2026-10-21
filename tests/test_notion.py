@@ -111,7 +111,9 @@ class SyncTests(NotionTestCase):
         self.assertEqual(decision_pages[0]["properties"]["Task"], [url(10)])
         self.assertEqual(decision_pages[0]["properties"]["Reversible"], "__NO__")
         self.assertEqual(decision_pages[0]["properties"]["Rejected"],
-                         "UPDATE members.points_balance directly\nSoft-delete the original earn row")
+                         "UPDATE `members.points_balance` directly\nSoft-delete the original earn row")
+        self.assertEqual(decision_pages[0]["properties"]["Files"],
+                         "`app/Points/RefundOrderPoints.php`, `app/Points/PointsBalance.php`")
         self.assertNotIn("Impact", decision_pages[2]["properties"])
         question = plan["actions"][1]["calls"][0]["arguments"]["pages"][0]["properties"]
         self.assertEqual(question["Rating"], 3)
@@ -183,6 +185,20 @@ class SyncTests(NotionTestCase):
 class NotionContentTests(unittest.TestCase):
     def test_escapes_markdown_syntax(self):
         self.assertEqual(store.notion_escape("a $10 refund <b> [x] *y*"), r"a \$10 refund \<b\> \[x\] \*y\*")
+
+    def test_dotted_names_become_code_so_notion_does_not_link_them(self):
+        self.assertEqual(store.notion_text("runs scripts/store.py save on task.id"),
+                         "runs `scripts/store.py` save on `task.id`")
+        self.assertEqual(store.notion_text("see SKILL.md, then $10."), r"see `SKILL.md`, then \$10.")
+        self.assertEqual(store.notion_text("e.g. Python 3.9 at github.com/acme"),
+                         "e.g. Python 3.9 at `github.com`/acme")
+        self.assertEqual(store.notion_text("https://example.com/a.b stays"), "https://example.com/a.b stays")
+
+    def test_text_properties_are_escaped(self):
+        entry = example()
+        entry["questions"][0]["feedback"] = "A $10 refund and a $50 refund"
+        props = store.notion_question_properties(entry["questions"][0], url(10))
+        self.assertEqual(props["Feedback"], r"A \$10 refund and a \$50 refund")
 
     def test_quiz_toggles_and_code(self):
         content = store.render_notion_content(example())

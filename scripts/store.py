@@ -688,6 +688,7 @@ NOTION_VIEWS = {
 }
 # Characters Notion-flavored Markdown treats as syntax outside code.
 NOTION_ESCAPE_RE = re.compile(r"([\\*~`$\[\]<>{}|^])")
+DOTTED_NAME_RE = re.compile(r"(?<![\w`/:.-])(?:[\w-]+/)*[\w-]+(?:\.[\w-]+)+(?![\w`])")
 NOTION_ID_RE = re.compile(r"([0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})", re.I)
 
 
@@ -718,15 +719,34 @@ def notion_escape(text):
     return NOTION_ESCAPE_RE.sub(r"\\\1", text)
 
 
+def notion_text(text):
+    """Escape text for Notion, wrapping file and code names in inline code.
+
+    Notion turns bare names like store.py or SKILL.md into web links (.py and
+    .md are real domains), so anything shaped like a dotted name becomes code.
+    """
+    out = []
+    last = 0
+    for match in DOTTED_NAME_RE.finditer(text):
+        name = match.group(0)
+        if len(name.rsplit(".", 1)[1]) < 2 or not re.search(r"[A-Za-z]", name):
+            continue  # "e.g", version numbers
+        out.append(notion_escape(text[last:match.start()]))
+        out.append("`%s`" % name)
+        last = match.end()
+    out.append(notion_escape(text[last:]))
+    return "".join(out)
+
+
 def render_notion_content(entry):
     """The Task page body: quiz toggles and the code snippet, in Notion-flavored Markdown."""
     lines = ["## Quiz", ""]
     for i, item in enumerate(entry["quiz"], 1):
         lines += [
             "<toggle>",
-            "**%d. %s.** %s" % (i, item["type"].capitalize(), notion_escape(item["question"])),
+            "**%d. %s.** %s" % (i, item["type"].capitalize(), notion_text(item["question"])),
             "",
-            notion_escape(item["answer"]),
+            notion_text(item["answer"]),
             "",
             "Proof: `%s`" % item["file"].replace("`", "'"),
             "</toggle>",
@@ -736,7 +756,7 @@ def render_notion_content(entry):
     if code:
         lines += ["## Code", "", "`%s`" % code["file"].replace("`", "'"), ""]
         if code.get("note"):
-            lines += [notion_escape(code["note"]), ""]
+            lines += [notion_text(code["note"]), ""]
         language = FENCE_LANGUAGES.get(os.path.splitext(code["file"])[1].lower(), "")
         for label, key in (("Before", "before"), ("After", "after")):
             fence = _fence_for(code[key])
@@ -744,8 +764,10 @@ def render_notion_content(entry):
     return "\n".join(lines).rstrip("\n") + "\n"
 
 
-def _clip(text):
-    return text if len(text) <= NOTION_TEXT_LIMIT else text[:NOTION_TEXT_LIMIT - 1] + "…"
+def _rich(text):
+    # Notion parses text properties as Markdown too, so they get the same escaping as page content.
+    clipped = text if len(text) <= NOTION_TEXT_LIMIT else text[:NOTION_TEXT_LIMIT - 1] + "…"
+    return notion_text(clipped)
 
 
 def _option(text):
@@ -760,7 +782,7 @@ def _date_props(name, value):
 def notion_task_properties(entry):
     task = entry["task"]
     props = {
-        "Name": task["title"],
+        "Name": notion_text(task["title"]),
         "Task ID": task["id"],
         "Project": task["project"],
         "Repo": task.get("repo") or "",
@@ -768,9 +790,9 @@ def notion_task_properties(entry):
         "Stack": [_option(s) for s in task["stack"]],
         "Layers": [LAYER_LABELS[layer] for layer in task["layers"]],
         "Risk": task["risk"],
-        "How it works": _clip(task["how_it_works"]),
-        "What surprised me": _clip(task["surprised_me"]),
-        "What could bite again": _clip(task["would_bite_again"]),
+        "How it works": _rich(task["how_it_works"]),
+        "What surprised me": _rich(task["surprised_me"]),
+        "What could bite again": _rich(task["would_bite_again"]),
     }
     props.update(_date_props("Logged", parse_datetime(task["created_at"]).date().isoformat()))
     if entry.get("review"):
@@ -780,26 +802,26 @@ def notion_task_properties(entry):
 
 def notion_decision_properties(decision, task_url):
     props = {
-        "Decision": decision["title"],
-        "Chosen": _clip(decision["chosen"]),
-        "Rejected": _clip("\n".join(decision["rejected"])),
-        "Why": _clip(decision["why"]),
+        "Decision": notion_text(decision["title"]),
+        "Chosen": _rich(decision["chosen"]),
+        "Rejected": _rich("\n".join(decision["rejected"])),
+        "Why": _rich(decision["why"]),
         "Kind": decision["kind"],
         "Reversible": "__YES__" if decision["reversible"] else "__NO__",
-        "Files": _clip(", ".join(decision["files"])),
+        "Files": _rich(", ".join(decision["files"])),
         "Task": [task_url],
     }
     if decision.get("impact"):
-        props["Impact"] = _clip(decision["impact"])
+        props["Impact"] = _rich(decision["impact"])
     return props
 
 
 def notion_question_properties(question, task_url):
     return {
-        "What I asked": question["asked"],
-        "What I should have asked": _clip(question["should_have_asked"]),
+        "What I asked": notion_text(question["asked"]),
+        "What I should have asked": _rich(question["should_have_asked"]),
         "Rating": question["rating"],
-        "Feedback": _clip(question["feedback"]),
+        "Feedback": _rich(question["feedback"]),
         "Task": [task_url],
     }
 

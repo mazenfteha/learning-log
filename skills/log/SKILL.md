@@ -2,7 +2,7 @@
 name: log
 description: Turn the current coding session into a short, project-specific lesson saved to the local Learning Log (JSON plus readable Markdown). Use when the user runs /log or asks to log what they learned in this session.
 disable-model-invocation: true
-allowed-tools: Bash(git status *) Bash(git diff *) Bash(git log *) Bash(git show *) Bash(git rev-parse *) Bash(git remote *) Bash(python3 --version) Bash(python --version) Bash(py -3 --version) Bash(python3 "${CLAUDE_SKILL_DIR}/../../scripts/store.py" *) Bash(python "${CLAUDE_SKILL_DIR}/../../scripts/store.py" *) Bash(py -3 "${CLAUDE_SKILL_DIR}/../../scripts/store.py" *) PowerShell(git status *) PowerShell(git diff *) PowerShell(git log *) PowerShell(git show *) PowerShell(git rev-parse *) PowerShell(git remote *) PowerShell(python3 --version) PowerShell(python --version) PowerShell(py -3 --version) PowerShell(python3 "${CLAUDE_SKILL_DIR}/../../scripts/store.py" *) PowerShell(python "${CLAUDE_SKILL_DIR}/../../scripts/store.py" *) PowerShell(py -3 "${CLAUDE_SKILL_DIR}/../../scripts/store.py" *)
+allowed-tools: Bash(git status *) Bash(git diff *) Bash(git log *) Bash(git show *) Bash(git rev-parse *) Bash(git remote *) Bash(python3 --version) Bash(python --version) Bash(py -3 --version) Bash(python3 "${CLAUDE_SKILL_DIR}/../../scripts/store.py" *) Bash(python "${CLAUDE_SKILL_DIR}/../../scripts/store.py" *) Bash(py -3 "${CLAUDE_SKILL_DIR}/../../scripts/store.py" *) PowerShell(git status *) PowerShell(git diff *) PowerShell(git log *) PowerShell(git show *) PowerShell(git rev-parse *) PowerShell(git remote *) PowerShell(python3 --version) PowerShell(python --version) PowerShell(py -3 --version) PowerShell(python3 "${CLAUDE_SKILL_DIR}/../../scripts/store.py" *) PowerShell(python "${CLAUDE_SKILL_DIR}/../../scripts/store.py" *) PowerShell(py -3 "${CLAUDE_SKILL_DIR}/../../scripts/store.py" *) mcp__claude_ai_Notion__notion-search mcp__claude_ai_Notion__notion-fetch mcp__claude_ai_Notion__notion-create-pages mcp__claude_ai_Notion__notion-update-page mcp__claude_ai_Notion__notion-create-database mcp__claude_ai_Notion__notion-create-view mcp__claude_ai_Notion__notion-query-data-sources mcp__claude_ai_Notion__notion-get-async-task
 ---
 
 # Learning Log: /log
@@ -90,10 +90,15 @@ Run `STORE save "<dir>/<task-id>.json"`.
 - **It prints errors.** Each one names the exact field (for example `quiz[2].file: required field is missing`). Fix only those fields, rewrite the file and run save once more. For a secret error, remove or describe the value; never repeat it.
 - **It fails again.** Show the errors and the draft path, then stop.
 
-## 6. Reply
+## 6. Sync to Notion
 
-Reply in one or two lines, based on the save output. Say what was logged and give the Markdown path. For example:
+If this session has Notion MCP tools (a tool name ending in `notion-create-pages`), read `${CLAUDE_SKILL_DIR}/notion.md` and follow it. That also sends older entries that never reached Notion, so run it even when save printed `unchanged`. Without Notion tools, skip this step and don't mention Notion.
+
+## 7. Reply
+
+Reply in one or two lines, based on the save output. Say what was logged and give the Markdown path, then the Notion page from the plan's `links` if step 6 ran. For example:
 
 `Logged LOY-214: 2 decisions, 1 question, 4 quiz. ~/.learning-log/entries/loyalty-api/LOY-214.md`
+`Notion: https://www.notion.so/…`
 
 If save printed `unchanged`, say the session was already logged and nothing new was added.

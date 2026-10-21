@@ -936,12 +936,14 @@ def notion_plan(task_id=None):
         links[tid] = url
         if synced.get("task_hash") != notion_task_hash(entry):
             page_id = notion_id(url)
-            actions.append(_action("task:" + tid, [
+            action = _action("task:" + tid, [
                 _call("notion-update-page", {"page_id": page_id, "command": "update_properties",
                                              "properties": properties}),
                 _call("notion-update-page", {"page_id": page_id, "command": "replace_content",
                                              "new_str": content}),
-            ], ["url"]))
+            ], ["url"], note="Updating an existing page: record this action's url.")
+            action["url"] = url
+            actions.append(action)
         for kind, build in (("decisions", notion_decision_properties), ("questions", notion_question_properties)):
             items = _pending_items(entry, synced, kind)
             if items:

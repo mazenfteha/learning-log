@@ -138,6 +138,7 @@ class SyncTests(NotionTestCase):
         update = plan["actions"][0]["calls"]
         self.assertEqual([c["arguments"]["command"] for c in update], ["update_properties", "replace_content"])
         self.assertEqual(update[0]["arguments"]["page_id"], "%032x" % 10)
+        self.assertEqual(plan["actions"][0]["url"], url(10))
         new_decisions = plan["actions"][1]["calls"][0]["arguments"]["pages"]
         self.assertEqual([p["properties"]["Decision"] for p in new_decisions], ["Round partial reversals down"])
 

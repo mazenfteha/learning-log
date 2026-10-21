@@ -11,11 +11,14 @@ kept in sync with it.
     store.py due [--project P]      entries due for review today or earlier
     store.py show <task-id>         print the rendered Markdown
     store.py home                   print the storage root and the temp dir for drafts
+    store.py notion-plan [task-id]  print the next Notion tool calls to make, as JSON
+    store.py notion-record <file>   record the Notion URLs those calls returned
 """
 
 import argparse
 import copy
 import datetime as dt
+import hashlib
 import json
 import os
 import re
@@ -656,6 +659,383 @@ def _fence_for(text):
     return "`" * max(3, longest + 1)
 
 
+# ---------------------------------------------------------------- notion
+#
+# Notion is a one-way view of the local entries. notion_plan() works out the
+# next Notion MCP calls to make, with arguments in the exact shape the tools
+# take; the skill runs them verbatim and hands the returned URLs to
+# notion_record(). Each round only plans calls whose inputs (page, database and
+# data source IDs) are already recorded, so repeating plan -> calls -> record
+# until the plan is empty does first-run setup, new pages and updates alike.
+# Sync state lives in <home>/notion.json, never in the entries.
+
+NOTION_PAGE_TITLE = "Learning Log"
+NOTION_PAGE_INTRO = (
+    "Lessons from my coding sessions, written by the /log skill. "
+    "The JSON files in ~/.learning-log are the source of truth; this page is a view of them, "
+    "so edits made here can be overwritten."
+)
+NOTION_TEXT_LIMIT = 2000
+LAYER_LABELS = {"business_logic": "business logic", "code": "code",
+                "architecture": "architecture", "stack": "stack"}
+KIND_COLORS = (("product", "blue"), ("architecture", "purple"), ("security", "red"),
+               ("workaround", "orange"), ("deferred", "yellow"), ("process", "gray"))
+NOTION_VIEWS = {
+    "review_due": {"database": "tasks", "name": "Review due",
+                   "configure": 'FILTER "Review due" <= "today"; SORT BY "Review due" ASC'},
+    "tech_debt": {"database": "decisions", "name": "Tech debt",
+                  "configure": 'FILTER "Kind" IN ("workaround", "deferred"); SORT BY "Decision" ASC'},
+}
+# Characters Notion-flavored Markdown treats as syntax outside code.
+NOTION_ESCAPE_RE = re.compile(r"([\\*~`$\[\]<>{}|^])")
+NOTION_ID_RE = re.compile(r"([0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})", re.I)
+
+
+def notion_state_path():
+    return home() / "notion.json"
+
+
+def load_notion_state():
+    path = notion_state_path()
+    state = load_json(path) if path.exists() else {}
+    state.setdefault("version", 1)
+    state.setdefault("workspace", {})
+    state["workspace"].setdefault("databases", {})
+    state["workspace"].setdefault("views", {})
+    state.setdefault("entries", {})
+    return state
+
+
+def notion_id(value):
+    """The bare 32-hex ID inside a Notion URL, UUID or collection:// URI."""
+    matches = NOTION_ID_RE.findall(value or "")
+    if not matches:
+        raise EntryError(["%r does not contain a Notion ID" % value])
+    return matches[-1].replace("-", "").lower()
+
+
+def notion_escape(text):
+    return NOTION_ESCAPE_RE.sub(r"\\\1", text)
+
+
+def render_notion_content(entry):
+    """The Task page body: quiz toggles and the code snippet, in Notion-flavored Markdown."""
+    lines = ["## Quiz", ""]
+    for i, item in enumerate(entry["quiz"], 1):
+        lines += [
+            "<toggle>",
+            "**%d. %s.** %s" % (i, item["type"].capitalize(), notion_escape(item["question"])),
+            "",
+            notion_escape(item["answer"]),
+            "",
+            "Proof: `%s`" % item["file"].replace("`", "'"),
+            "</toggle>",
+            "",
+        ]
+    code = entry.get("code")
+    if code:
+        lines += ["## Code", "", "`%s`" % code["file"].replace("`", "'"), ""]
+        if code.get("note"):
+            lines += [notion_escape(code["note"]), ""]
+        language = FENCE_LANGUAGES.get(os.path.splitext(code["file"])[1].lower(), "")
+        for label, key in (("Before", "before"), ("After", "after")):
+            fence = _fence_for(code[key])
+            lines += ["**%s**" % label, "", fence + language, code[key], fence, ""]
+    return "\n".join(lines).rstrip("\n") + "\n"
+
+
+def _clip(text):
+    return text if len(text) <= NOTION_TEXT_LIMIT else text[:NOTION_TEXT_LIMIT - 1] + "…"
+
+
+def _option(text):
+    # Notion option names can't contain commas.
+    return " ".join(text.replace(",", " ").split())
+
+
+def _date_props(name, value):
+    return {"date:%s:start" % name: value, "date:%s:is_datetime" % name: 0}
+
+
+def notion_task_properties(entry):
+    task = entry["task"]
+    props = {
+        "Name": task["title"],
+        "Task ID": task["id"],
+        "Project": task["project"],
+        "Repo": task.get("repo") or "",
+        "Branch": task.get("branch") or "",
+        "Stack": [_option(s) for s in task["stack"]],
+        "Layers": [LAYER_LABELS[layer] for layer in task["layers"]],
+        "Risk": task["risk"],
+        "How it works": _clip(task["how_it_works"]),
+        "What surprised me": _clip(task["surprised_me"]),
+        "What could bite again": _clip(task["would_bite_again"]),
+    }
+    props.update(_date_props("Logged", parse_datetime(task["created_at"]).date().isoformat()))
+    if entry.get("review"):
+        props.update(_date_props("Review due", entry["review"]["due"]))
+    return props
+
+
+def notion_decision_properties(decision, task_url):
+    props = {
+        "Decision": decision["title"],
+        "Chosen": _clip(decision["chosen"]),
+        "Rejected": _clip("\n".join(decision["rejected"])),
+        "Why": _clip(decision["why"]),
+        "Kind": decision["kind"],
+        "Reversible": "__YES__" if decision["reversible"] else "__NO__",
+        "Files": _clip(", ".join(decision["files"])),
+        "Task": [task_url],
+    }
+    if decision.get("impact"):
+        props["Impact"] = _clip(decision["impact"])
+    return props
+
+
+def notion_question_properties(question, task_url):
+    return {
+        "What I asked": question["asked"],
+        "What I should have asked": _clip(question["should_have_asked"]),
+        "Rating": question["rating"],
+        "Feedback": _clip(question["feedback"]),
+        "Task": [task_url],
+    }
+
+
+def notion_task_hash(entry):
+    payload = {"properties": notion_task_properties(entry), "content": render_notion_content(entry)}
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+
+
+def _sql_options(values, colors=None):
+    parts = []
+    for value in values:
+        quoted = "'%s'" % value.replace("'", "''")
+        parts.append("%s:%s" % (quoted, colors.get(value, "default") if colors else "default"))
+    return ", ".join(parts)
+
+
+def notion_ddl(kind, entries=(), tasks_data_source_id=None):
+    """CREATE TABLE statements for notion-create-database."""
+    if kind == "tasks":
+        projects = sorted({e["task"]["project"] for e in entries})
+        stacks = sorted({_option(s) for e in entries for s in e["task"]["stack"]})
+        layers = [LAYER_LABELS[layer] for layer in LAYERS]
+        columns = [
+            '"Name" TITLE', '"Task ID" RICH_TEXT',
+            '"Project" SELECT(%s)' % _sql_options(projects),
+            '"Repo" RICH_TEXT', '"Branch" RICH_TEXT',
+            '"Stack" MULTI_SELECT(%s)' % _sql_options(stacks),
+            '"Layers" MULTI_SELECT(%s)' % _sql_options(layers),
+            '"Risk" SELECT(%s)' % _sql_options(RISKS, {"low": "green", "medium": "yellow", "high": "red"}),
+            '"How it works" RICH_TEXT', '"What surprised me" RICH_TEXT', '"What could bite again" RICH_TEXT',
+            '"Logged" DATE', '"Review due" DATE',
+        ]
+    elif kind == "decisions":
+        columns = [
+            '"Decision" TITLE', '"Chosen" RICH_TEXT', '"Rejected" RICH_TEXT', '"Why" RICH_TEXT',
+            '"Impact" RICH_TEXT',
+            '"Kind" SELECT(%s)' % _sql_options([k for k, _ in KIND_COLORS], dict(KIND_COLORS)),
+            '"Reversible" CHECKBOX', '"Files" RICH_TEXT',
+            "\"Task\" RELATION('%s', DUAL 'Decisions')" % tasks_data_source_id,
+        ]
+    else:
+        columns = [
+            '"What I asked" TITLE', '"What I should have asked" RICH_TEXT', '"Rating" NUMBER',
+            '"Feedback" RICH_TEXT',
+            "\"Task\" RELATION('%s', DUAL 'Questions')" % tasks_data_source_id,
+        ]
+    return "CREATE TABLE (%s)" % ", ".join(columns)
+
+
+def _action(ref, calls, record, note=None):
+    action = {"ref": ref, "calls": calls, "record": record}
+    if note:
+        action["note"] = note
+    return action
+
+
+def _call(tool, arguments):
+    return {"tool": tool, "arguments": arguments}
+
+
+def _setup_actions(ws, entries):
+    page = ws.get("page")
+    dbs = ws["databases"]
+    if not page:
+        return [_action("setup:page", [_call("notion-create-pages", {
+            "creation_mode": "draft",
+            "pages": [{"properties": {"title": NOTION_PAGE_TITLE}, "icon": "📓", "content": NOTION_PAGE_INTRO}],
+        })], ["url"], note="Before creating, search Notion for an existing 'Learning Log' page holding "
+                           "Tasks, Decisions and Questions databases; if one exists, record it instead.")]
+    if "tasks" not in dbs:
+        return [_action("setup:db:tasks", [_call("notion-create-database", {
+            "parent": {"type": "page_id", "page_id": notion_id(page["url"])},
+            "title": "Tasks",
+            "schema": notion_ddl("tasks", entries),
+        })], ["url", "data_source_id"])]
+    actions = []
+    tasks_ds = notion_id(dbs["tasks"]["data_source_id"])
+    for kind, title in (("decisions", "Decisions"), ("questions", "Questions")):
+        if kind not in dbs:
+            actions.append(_action("setup:db:" + kind, [_call("notion-create-database", {
+                "parent": {"type": "page_id", "page_id": notion_id(page["url"])},
+                "title": title,
+                "schema": notion_ddl(kind, tasks_data_source_id=tasks_ds),
+            })], ["url", "data_source_id"]))
+    for key, view in NOTION_VIEWS.items():
+        db = dbs.get(view["database"])
+        if key not in ws["views"] and db:
+            actions.append(_action("setup:view:" + key, [_call("notion-create-view", {
+                "database_id": notion_id(db["url"]),
+                "data_source_id": db["data_source_id"],
+                "name": view["name"],
+                "type": "table",
+                "configure": view["configure"],
+            })], ["url"]))
+    return actions
+
+
+def _pending_items(entry, synced, kind):
+    """The decisions or questions of an entry not yet in Notion, in entry order."""
+    field = MERGE_KEYS[kind]
+    done = synced.get(kind, {})
+    return [item for item in entry[kind] if _merge_key(item[field]) not in done]
+
+
+def notion_plan(task_id=None):
+    state = load_notion_state()
+    entries = [entry for _, entry in iter_entries()]
+    if task_id:
+        entries = [e for e in entries if e["task"]["id"].casefold() == task_id.casefold()]
+    entries.sort(key=lambda e: (e["task"].get("created_at", ""), e["task"]["id"]))
+    ws = state["workspace"]
+    links = {}
+    if not entries:
+        return {"status": "done", "actions": [], "links": links}
+
+    actions = _setup_actions(ws, entries)
+    if actions or len(ws["databases"]) < 3:
+        return {"status": "todo", "actions": actions, "links": links}
+
+    dbs = ws["databases"]
+    for entry in entries:
+        tid = entry["task"]["id"]
+        synced = state["entries"].get(tid, {})
+        url = synced.get("page_url")
+        properties = notion_task_properties(entry)
+        content = render_notion_content(entry)
+        if not url:
+            actions.append(_action("task:" + tid, [_call("notion-create-pages", {
+                "parent": {"type": "data_source_id", "data_source_id": notion_id(dbs["tasks"]["data_source_id"])},
+                "pages": [{"properties": properties, "content": content}],
+            })], ["url"]))
+            continue
+        links[tid] = url
+        if synced.get("task_hash") != notion_task_hash(entry):
+            page_id = notion_id(url)
+            actions.append(_action("task:" + tid, [
+                _call("notion-update-page", {"page_id": page_id, "command": "update_properties",
+                                             "properties": properties}),
+                _call("notion-update-page", {"page_id": page_id, "command": "replace_content",
+                                             "new_str": content}),
+            ], ["url"]))
+        for kind, build in (("decisions", notion_decision_properties), ("questions", notion_question_properties)):
+            items = _pending_items(entry, synced, kind)
+            if items:
+                actions.append(_action("%s:%s" % (kind, tid), [_call("notion-create-pages", {
+                    "parent": {"type": "data_source_id", "data_source_id": notion_id(dbs[kind]["data_source_id"])},
+                    "pages": [{"properties": build(item, url)} for item in items],
+                })], ["urls"]))
+    return {"status": "todo" if actions else "done", "actions": actions, "links": links}
+
+
+def notion_record(results):
+    """Store the URLs returned by the calls of one plan round. Recording the same results twice is harmless."""
+    if not isinstance(results, dict):
+        raise EntryError(["results: expected an object mapping action refs to what they returned"])
+    state = load_notion_state()
+    ws = state["workspace"]
+    entries = {e["task"]["id"]: e for _, e in iter_entries()}
+    errors = []
+    for ref, result in results.items():
+        if not isinstance(result, dict):
+            errors.append("%s: expected an object" % ref)
+            continue
+        kind, _, rest = ref.partition(":")
+        try:
+            if kind == "setup":
+                _record_setup(ws, rest, result)
+            elif kind == "task":
+                entry = _entry_for(entries, rest)
+                notion_id(_required_url(result, ref))
+                synced = state["entries"].setdefault(entry["task"]["id"], {})
+                synced["page_url"] = result["url"]
+                synced["task_hash"] = notion_task_hash(entry)
+            elif kind in ("decisions", "questions"):
+                entry = _entry_for(entries, rest)
+                synced = state["entries"].setdefault(entry["task"]["id"], {})
+                _record_items(entry, synced, kind, result, ref)
+            else:
+                errors.append("%s: unknown action ref" % ref)
+        except EntryError as e:
+            errors.extend("%s: %s" % (ref, message) for message in e.errors)
+    if errors:
+        raise EntryError(errors)
+    _write_atomic(notion_state_path(), json.dumps(state, indent=2, ensure_ascii=False) + "\n")
+    return state
+
+
+def _required_url(result, ref):
+    url = result.get("url")
+    if not isinstance(url, str) or not url.startswith(("https://", "http://", "view://", "collection://")):
+        raise EntryError(["expected \"url\" with the Notion URL the call returned"])
+    return url
+
+
+def _record_setup(ws, what, result):
+    url = _required_url(result, "setup:" + what)
+    notion_id(url)
+    if what == "page":
+        ws["page"] = {"url": url}
+    elif what.startswith("db:") and what[3:] in ("tasks", "decisions", "questions"):
+        ds = result.get("data_source_id")
+        if not isinstance(ds, str):
+            raise EntryError(["expected \"data_source_id\" from the <data-source url=\"collection://...\"> tag"])
+        ws["databases"][what[3:]] = {"url": url, "data_source_id": "collection://" + notion_id(ds)}
+    elif what.startswith("view:") and what[5:] in NOTION_VIEWS:
+        ws["views"][what[5:]] = {"url": url}
+    else:
+        raise EntryError(["unknown setup step"])
+
+
+def _entry_for(entries, task_id):
+    for tid, entry in entries.items():
+        if tid.casefold() == task_id.casefold():
+            return entry
+    raise EntryError(["no local entry with task id %r" % task_id])
+
+
+def _record_items(entry, synced, kind, result, ref):
+    done = synced.setdefault(kind, {})
+    if "existing" in result:
+        # Rebuilding the map from rows already in Notion: {title or asked text: page URL}.
+        for text, url in result["existing"].items():
+            notion_id(url)
+            done[_merge_key(text)] = url
+        return
+    urls = result.get("urls")
+    pending = _pending_items(entry, synced, kind)
+    if not isinstance(urls, list) or len(urls) != len(pending):
+        raise EntryError(["expected \"urls\" with %d page URL%s, in the order the pages were sent"
+                          % (len(pending), "" if len(pending) == 1 else "s")])
+    for item, url in zip(pending, urls):
+        notion_id(url)
+        done[_merge_key(item[MERGE_KEYS[kind]])] = url
+
+
 # ---------------------------------------------------------------- queries
 
 
@@ -743,6 +1123,21 @@ def _cmd_home(args):
     return 0
 
 
+def _cmd_notion_plan(args):
+    print(json.dumps(notion_plan(args.task_id), indent=2, ensure_ascii=False))
+    return 0
+
+
+def _cmd_notion_record(args):
+    path = Path(args.results)
+    results = load_entry_file(path)
+    state = notion_record(results)
+    if _is_inside(path, tmp_dir()):
+        path.unlink()
+    print("recorded %s (%d entries synced)" % (", ".join(results) or "nothing", len(state["entries"])))
+    return 0
+
+
 def build_parser():
     parser = argparse.ArgumentParser(prog="store.py", description="Learning Log local store.")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -771,6 +1166,14 @@ def build_parser():
 
     p = sub.add_parser("home", help="print the storage root and the temp dir for drafts")
     p.set_defaults(func=_cmd_home)
+
+    p = sub.add_parser("notion-plan", help="print the next Notion tool calls to make, as JSON")
+    p.add_argument("task_id", nargs="?", help="only this entry (default: every entry)")
+    p.set_defaults(func=_cmd_notion_plan)
+
+    p = sub.add_parser("notion-record", help="record the Notion URLs returned by the planned calls")
+    p.add_argument("results", help='JSON file: {"<action ref>": {"url": ...}, ...}')
+    p.set_defaults(func=_cmd_notion_record)
     return parser
 
 

@@ -33,6 +33,8 @@ Log only if there is something worth taking away: a business rule, a non-obvious
 
 If the session was trivial (renames, formatting, typos, copy changes, routine dependency bumps), reply with one line, `Nothing worth logging: <reason>.`, and stop. An empty log is better than a padded one.
 
+This conversation is the session. If it has no real work in it (for example, `/log` is the first message), reply `Nothing worth logging: no work in this session.` and stop. Never rebuild an earlier session from git history or old commits, and don't offer to: without the conversation, the questions, rating and "should have asked" would be invented.
+
 ## 3. Draft the entry
 
 First find Python: run `python3 --version`, then `python --version`, then `py -3 --version`, and stop at the first that prints `Python 3.`. That command is `<python>`. On Windows, `python3` and `python` are often Store stubs that print "Python was not found"; that counts as a failure.

@@ -6,19 +6,27 @@ At the end of a session worth remembering, type `/log`. Claude writes a lesson a
 
 Entries are saved on your machine as JSON plus Markdown, and synced to Notion when it's connected.
 
-## Try it locally
+## Install
 
-You need Claude Code and Python 3.9+. There's nothing to install and no setup.
+You need Claude Code, git and Python 3.9+ (on Windows the `py` launcher is enough). Then run:
 
 ```bash
-git clone <this repo> learning-log
-cd your-project
+claude plugin marketplace add mazenfteha/learning-log
+claude plugin install learning-log@learning-log
+```
+
+That's it. In any session, do some real work, then type `/log` (or `/learning-log:log`). The reply gives the path to the saved lesson. This also works in the VS Code and desktop apps.
+
+To update: `claude plugin update learning-log@learning-log`. To remove: `claude plugin uninstall learning-log@learning-log`.
+
+## Develop locally
+
+```bash
+git clone https://github.com/mazenfteha/learning-log
 claude --plugin-dir /path/to/learning-log
 ```
 
-Do some real work, then type `/log` (or `/learning-log:log`). The reply gives the path to the saved lesson.
-
-If you edit the plugin during a session, run `/reload-plugins`.
+This loads the plugin for that one session only. If you edit the plugin during the session, run `/reload-plugins`. Before a release, bump `version` in `.claude-plugin/plugin.json` and run `claude plugin validate --strict .`.
 
 ## Where entries go
 
@@ -27,7 +35,7 @@ If you edit the plugin during a session, run `/reload-plugins`.
 ~/.learning-log/entries/<project>/<task-id>.md     # readable copy
 ```
 
-Set `LEARNING_LOG_HOME` to use another folder. Running `/log` again on the same task updates the entry and never duplicates decisions, questions or quiz items. Each new entry is due for review 3 days after it's created.
+Set `LEARNING_LOG_HOME` to use another folder. Running `/log` again on the same task updates the entry and never duplicates decisions, questions or quiz items. Each new entry is marked for re-reading 3 days after it's created; in Notion, it shows up in the "Review due" view.
 
 See [examples/entry.example.md](examples/entry.example.md) for what a lesson looks like, and [schema/entry.schema.json](schema/entry.schema.json) for the entry contract.
 
@@ -39,7 +47,7 @@ The next `/log` creates a private **Learning Log** page in your Notion containin
 - **Tasks**, one page per lesson. The quiz is on the page as toggles: click one to reveal the answer.
 - **Decisions**, with a **Tech debt** view that lists workarounds and deferred decisions.
 - **Questions**: what you asked, and what you should have asked.
-- A **Review due** view on Tasks.
+- A **Review due** view on Tasks: lessons worth re-reading now.
 
 Every later `/log` updates that page and also sends any older entries that never reached Notion.
 
@@ -53,7 +61,7 @@ The skill handles the judgment; `scripts/store.py` handles everything that must 
 python3 scripts/store.py save <entry.json>      # validate, upsert, render .md
 python3 scripts/store.py validate <entry.json>  # validate only; exit 1 with errors
 python3 scripts/store.py list [--project P]
-python3 scripts/store.py due [--project P]      # due for review today or earlier
+python3 scripts/store.py due [--project P]      # lessons marked for re-reading by today
 python3 scripts/store.py show <task-id>         # print the Markdown
 python3 scripts/store.py notion-plan            # next Notion calls for the skill, as JSON
 python3 scripts/store.py notion-record <file>   # record what those calls returned
@@ -68,6 +76,10 @@ Entries that look like they contain a secret (API keys, tokens, private keys, pa
 ```bash
 python3 -m unittest discover -s tests
 ```
+
+## License
+
+MIT. See [LICENSE](LICENSE).
 
 ## Credits
 

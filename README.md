@@ -4,7 +4,7 @@ A Claude Code plugin that turns AI coding sessions into short, readable lessons,
 
 At the end of a session worth remembering, type `/log`. Claude writes a lesson about that session: how the feature works, what surprised you, the decisions made (and what was rejected), the question you should have asked, and a short quiz. You only read it. Trivial sessions are skipped.
 
-**Status: Phase 2.** Entries are saved on your machine as JSON plus Markdown, and synced to Notion when it's connected. A `/review` quiz comes later.
+Entries are saved on your machine as JSON plus Markdown, and synced to Notion when it's connected.
 
 ## Try it locally
 

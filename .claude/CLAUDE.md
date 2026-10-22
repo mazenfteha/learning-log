@@ -8,7 +8,7 @@ Developers ship more than ever with AI coding agents, but the learning stays ins
 
 ## The product in one line
 
-At the end of a session worth remembering, the developer types `/log`. The plugin writes a lesson about that session. The developer only reads it, re-reading it in Notion whenever they like; each lesson ends with a short self-check quiz.
+At the end of a session worth remembering, the developer types `/learning-log:log` (or the short `/log` on Claude Code versions that link it). The plugin writes a lesson about that session. The developer only reads it, re-reading it in Notion whenever they like; each lesson ends with a short self-check quiz.
 
 ## Core principles
 
@@ -136,7 +136,9 @@ Notion sync runs in rounds: `notion-plan` → the skill makes the listed calls v
 - **Writing style of entries:** short sentences, plain words, no filler ("This session focused on…"), written in the developer's voice ("I", "my project").
 - **Paths in skills:** the skill finds `store.py` relative to its own base directory (`../../scripts/store.py`). Before relying on any environment variable for the plugin root, check the current Claude Code plugin docs.
 - **Commits:** small and focused, one logical change each, with a clear message.
-- **Releases:** bump `version` in `.claude-plugin/plugin.json` on every release; installs are pinned to it, so `claude plugin update` ignores new commits until it changes. Run `claude plugin validate --strict .` before releasing.
+- **Releases:** bump `version` in `.claude-plugin/plugin.json` on every release (current: 0.1.1); installs are pinned to it, so `claude plugin update` ignores new commits until it changes. Run `claude plugin validate --strict .` before releasing, then push. Users update with `claude plugin marketplace update learning-log`, then `claude plugin update learning-log@learning-log`, then a new session.
+- **Command name:** the skill is `/learning-log:log`. On Claude Code 2.1.211 the short `/log` is not linked to plugin skills (it's sent as plain text), so docs and replies lead with the full name. Plugins load at session start: a session opened before an install or update won't see the change.
+- **Testing the installed plugin:** `claude -p "/learning-log:log"` in any folder runs the installed copy. In an empty session it must reply "Nothing worth logging". Set `LEARNING_LOG_HOME` to a scratch folder for tests so the real log stays clean.
 
 ## What a good entry looks like
 
@@ -153,7 +155,7 @@ Anti-patterns: restating the diff line by line; generic advice ("write tests"); 
 1. **Local core (done).** Schema, example entry, `store.py` with tests, `/log` skill writing locally. Then tune lesson quality on real sessions.
 2. **Notion (done).** First-run setup creates a "Learning Log" page with three linked databases (Tasks, Decisions, Questions) via the Notion MCP. Upsert by task id. Views for "Review due" and "Tech debt" (decisions of kind `workaround` or `deferred`). Local JSON stays the source of truth.
 3. **Review (dropped).** A `/review` quiz loop was planned and dropped: lessons can be re-read in Notion any time, which is enough. Don't rebuild it without asking.
-4. **Package (current).** Plugin manifest, marketplace file, LICENSE, README install steps.
+4. **Package (done).** Plugin manifest, marketplace file, LICENSE, README install steps. Published at github.com/mazenfteha/learning-log; install with `claude plugin marketplace add mazenfteha/learning-log`, then `claude plugin install learning-log@learning-log`.
 5. **Later.** Evals (fires on real work, skips trivial sessions): `claude plugin eval` needs Claude Code 2.1.269+, WSL2 on Windows for Bash-using skills, and can't mock the claude.ai Notion connector. Also a session-end nudge, Cursor and Codex support, the Debrief game on the same data.
 
 Do not build ahead of the current phase. If something from a later phase seems needed, note it in the plan and ask.

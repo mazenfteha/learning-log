@@ -41,7 +41,7 @@ Then start a new Claude Code session, or reload the window in VS Code or the des
 ## Use it
 
 1. Work with Claude Code as usual.
-2. When the session taught you something, type **`/log`**. If another command already uses `/log`, type `/learning-log:log`.
+2. When the session taught you something, type **`/learning-log:log`** (typing `/learning` in the slash menu finds it). Newer Claude Code versions also accept the short **`/log`**, as long as no other command uses that name.
 3. Claude replies with one line naming what was logged and the path to the lesson. That's all.
 
 Running `/log` again on the same task updates the lesson. It never duplicates decisions, questions or quiz items.
@@ -79,7 +79,8 @@ Later runs update that page and also send any older lessons that never reached N
 
 | Problem | Fix |
 | --- | --- |
-| `/log` doesn't appear | Start a new session or reload the window after installing. Plugins load when a session starts. |
+| `/log` doesn't appear | Type the full name, `/learning-log:log`. Older Claude Code versions don't link the short `/log` to plugins (`claude update` fixes that). Also start a new session or reload the window after installing, because plugins load when a session starts. |
+| Changes to the plugin don't show up | Run `claude plugin marketplace update learning-log`, then `claude plugin update learning-log@learning-log`, then start a new session. |
 | "Python was not found" on Windows | Install Python 3.9+ from python.org. The skill tries `python3`, `python` and `py -3` in that order. |
 | "Nothing worth logging" | The session was trivial, or `/log` was run in a new, empty conversation. Run it at the end of the session where the work happened. |
 | Nothing shows up in Notion | Check that the Notion connector is on in claude.ai. Lessons are always saved locally; the next `/log` retries the sync. |

@@ -688,7 +688,7 @@ NOTION_VIEWS = {
 }
 # Characters Notion-flavored Markdown treats as syntax outside code.
 NOTION_ESCAPE_RE = re.compile(r"([\\*~`$\[\]<>{}|^])")
-DOTTED_NAME_RE = re.compile(r"(?<![\w`/:.-])(?:[\w-]+/)*[\w-]+(?:\.[\w-]+)+(?![\w`])")
+DOTTED_NAME_RE = re.compile(r"(?<![\w`/:.-])\.?(?:[\w.-]+/)*[\w-]+(?:\.[\w-]+)+(?![\w`])")
 NOTION_ID_RE = re.compile(r"([0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})", re.I)
 
 

@@ -193,6 +193,7 @@ class NotionContentTests(unittest.TestCase):
         self.assertEqual(store.notion_text("e.g. Python 3.9 at github.com/acme"),
                          "e.g. Python 3.9 at `github.com`/acme")
         self.assertEqual(store.notion_text("https://example.com/a.b stays"), "https://example.com/a.b stays")
+        self.assertEqual(store.notion_text("no .claude-plugin/plugin.json yet"), "no `.claude-plugin/plugin.json` yet")
 
     def test_text_properties_are_escaped(self):
         entry = example()

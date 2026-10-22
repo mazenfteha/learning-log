@@ -1,0 +1,14 @@
+{
+  "name": "learning-log",
+  "description": "The Learning Log plugin for Claude Code: short lessons from your coding sessions.",
+  "owner": {
+    "name": "Mazen Fteha"
+  },
+  "plugins": [
+    {
+      "name": "learning-log",
+      "source": "./",
+      "description": "Turn AI coding sessions into short lessons you only read."
+    }
+  ]
+}

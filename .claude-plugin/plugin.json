@@ -1,7 +1,7 @@
 {
   "name": "learning-log",
   "displayName": "Learning Log",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Turn AI coding sessions into short, project-specific lessons you only read. /log saves each lesson locally as JSON + Markdown and syncs it to Notion.",
   "author": {
     "name": "Mazen Fteha"

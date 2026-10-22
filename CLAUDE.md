@@ -153,8 +153,8 @@ Anti-patterns: restating the diff line by line; generic advice ("write tests"); 
 ## Phases
 
 1. **Local core (done).** Schema, example entry, `store.py` with tests, `/log` skill writing locally. Then tune lesson quality on real sessions.
-2. **Notion (current).** First-run setup creates a "Learning Log" page with three linked databases (Tasks, Decisions, Questions) via the Notion MCP. Upsert by task id. Views for "Review due" and "Tech debt" (decisions of kind `workaround` or `deferred`). Local JSON stays the source of truth.
-3. **Review.** `/review` skill: due questions one at a time, press Enter to reveal, `store.py reviewed` schedules the next date.
+2. **Notion (done).** First-run setup creates a "Learning Log" page with three linked databases (Tasks, Decisions, Questions) via the Notion MCP. Upsert by task id. Views for "Review due" and "Tech debt" (decisions of kind `workaround` or `deferred`). Local JSON stays the source of truth.
+3. **Review (current).** `/review` skill: due questions one at a time, press Enter to reveal, `store.py reviewed` schedules the next date.
 4. **Package.** Plugin manifest, marketplace file, README, evals (fires on real work, skips trivial sessions).
 5. **Later.** Session-end nudge, Cursor and Codex support, the Debrief game on the same data.
 

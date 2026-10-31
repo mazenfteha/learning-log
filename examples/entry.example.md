@@ -121,6 +121,29 @@ Proof: `app/Tiers/TierCalculator.php`
 
 </details>
 
+## Interview
+
+**1. Senior asks:** Why did you add a ledger row for the refund instead of just lowering the member's balance?
+
+- **Verdict:** solid
+- **My answer:** Because the balance is the sum of the ledger, so every change needs its own row. That way finance can see which refund took the points back.
+- **Feedback:** Right on both counts. You could add that editing the number would also break the reconciliation finance already runs on the ledger.
+- **Answer:** The ledger is append-only and PointsBalance::for() sums it, so a refund is a negative refund_reversal row linked to the order. Editing the balance would lose that history. (`app/Points/PointsBalance.php`)
+- **Say it:** Balances are computed from an append-only ledger, so a refund adds a negative row that points back to the order. Nothing gets edited, and finance can trace every point.
+
+**2. PM asks:** If a member already spent their points and then gets refunded, what does finance see?
+
+- **Verdict:** missed
+- **My answer:** I didn't know.
+- **Feedback:** This is the case finance will ask about first. You don't need the code, just the rule: we never go below zero, and we record what we couldn't take back.
+- **Answer:** The reversal stops at the member's current balance. The rest is stored on the ledger row as unrecovered_points, so finance can report it. (`app/Points/RefundOrderPoints.php`)
+- **Say it:** We take back what the member still has and never go negative. Anything we couldn't recover is stored as unrecovered_points for finance.
+
+**3. Customer asks:** I refunded the order that made me Gold. Am I still Gold?
+
+- **Answer:** Yes. TierCalculator uses lifetime earned points, which a refund doesn't change. Downgrading on refund is deferred to LOY-231. (`app/Tiers/TierCalculator.php`)
+- **Say it:** Yes, you keep Gold for now. Tiers use lifetime earned points, and a refund doesn't lower those yet.
+
 ## Code
 
 `app/Points/RefundOrderPoints.php`

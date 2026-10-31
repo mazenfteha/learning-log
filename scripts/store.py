@@ -10,6 +10,7 @@ kept in sync with it.
     store.py list [--project P]     one line per entry: date, project, id, title, due
     store.py due [--project P]      entries due for review today or earlier
     store.py show <task-id>         print the rendered Markdown
+    store.py interview-add <task-id> <items.json>  append interview items to a saved entry
     store.py home                   print the storage root and the temp dir for drafts
     store.py notion-plan [task-id]  print the next Notion tool calls to make, as JSON
     store.py notion-record <file>   record the Notion URLs those calls returned
@@ -41,6 +42,7 @@ QUIZ_TYPES = ("predict", "why", "where", "trap")
 INTERVIEW_ASKERS = ("senior", "pm", "customer")
 INTERVIEW_TOPICS = ("technical", "product")
 INTERVIEW_VERDICTS = ("solid", "partial", "missed", "skipped")
+ASKER_LABELS = {"senior": "Senior", "pm": "PM", "customer": "Customer"}
 # Items per interview-add call. A stored entry has no limit.
 INTERVIEW_ADD_LIMITS = (1, 5)
 
@@ -506,6 +508,59 @@ def save(src, now=None):
             "added": added, "notes": notes}
 
 
+def add_interview(task_id, src, now=None):
+    """Append the interview items in the JSON list at src to the saved entry task_id.
+
+    Items whose question is already stored are skipped; stored items are never changed.
+    Returns a dict with status ("updated" or "unchanged"), the saved paths and the
+    added and skipped counts.
+    """
+    src = Path(src)
+    items = load_entry_file(src)
+    if not isinstance(items, list):
+        raise EntryError(["%s: expected a JSON list of interview items" % src])
+    low, high = INTERVIEW_ADD_LIMITS
+    if not low <= len(items) <= high:
+        raise EntryError(["interview: expected %d to %d items, got %d" % (low, high, len(items))])
+    errors = []
+    for i, item in enumerate(items):
+        _check_interview_item(item, "interview[%d]" % i, errors)
+    errors.extend(scan_secrets(items, "interview"))
+    if errors:
+        raise EntryError(errors)
+
+    json_path = find_entry(task_id)
+    if json_path is None:
+        raise EntryError(["%s: no entry with this task id in %s; save the lesson first" % (task_id, entries_dir())])
+    md_path = json_path.with_suffix(".md")
+    entry = load_json(json_path)
+
+    now = now or dt.datetime.now(dt.timezone.utc).replace(microsecond=0)
+    items = [dict(item, answered_at=item.get("answered_at") or now.isoformat()) for item in items]
+    stored = entry.get("interview", [])
+    combined = _append_new(stored, items, "question")
+    added = len(combined) - len(stored)
+
+    if added:
+        entry = copy.deepcopy(entry)
+        entry["interview"] = combined
+        entry["task"]["updated_at"] = now.isoformat()
+        entry = canonical(entry)
+        stored_errors = validate_entry(entry, mode="stored")
+        if stored_errors:
+            raise EntryError(["merged entry is invalid: " + e for e in stored_errors])
+        _write_atomic(json_path, json.dumps(entry, indent=2, ensure_ascii=False) + "\n")
+    markdown = render_markdown(entry)
+    if not md_path.exists() or md_path.read_text(encoding="utf-8") != markdown:
+        _write_atomic(md_path, markdown)
+
+    if _is_inside(src, tmp_dir()):
+        src.unlink()
+
+    return {"status": "updated" if added else "unchanged", "id": entry["task"]["id"], "json": json_path,
+            "md": md_path, "added": added, "skipped": len(items) - added}
+
+
 def _new_entry(incoming, now):
     entry = copy.deepcopy(incoming)
     entry.pop("review", None)
@@ -516,6 +571,8 @@ def _new_entry(incoming, now):
     for key, field in MERGE_KEYS.items():
         entry[key] = _append_new([], entry[key], field)
         added[key] = len(entry[key])
+    if "interview" in entry:
+        entry["interview"] = _append_new([], entry["interview"], "question")
     created = parse_datetime(task["created_at"]).date()
     entry["review"] = {
         "due": (created + dt.timedelta(days=FIRST_INTERVAL_DAYS)).isoformat(),
@@ -540,6 +597,9 @@ def _merge(existing, incoming):
         before = len(entry.get(key, []))
         entry[key] = _append_new(entry.get(key, []), incoming[key], field)
         added[key] = len(entry[key]) - before
+    interview = _append_new(existing.get("interview", []), incoming.get("interview", []), "question")
+    if interview:
+        entry["interview"] = interview
     if "code" in incoming:
         entry["code"] = copy.deepcopy(incoming["code"])
     return canonical(entry), added
@@ -679,6 +739,18 @@ def render_markdown(entry):
         lines.append("")
         lines.append("</details>")
         lines.append("")
+
+    if entry.get("interview"):
+        lines += ["## Interview", ""]
+        for i, item in enumerate(entry["interview"], 1):
+            lines += ["**%d. %s asks:** %s" % (i, ASKER_LABELS[item["asker"]], item["question"]), ""]
+            if item["verdict"] != "skipped":
+                lines.append("- **Verdict:** " + item["verdict"])
+                lines.append("- **My answer:** " + (item["my_answer"] or "I didn't know."))
+                lines.append("- **Feedback:** " + item["feedback"])
+            lines.append("- **Answer:** %s (`%s`)" % (item["answer"], item["file"]))
+            lines.append("- **Say it:** " + item["say_it"])
+            lines.append("")
 
     code = entry.get("code")
     if code:
@@ -1139,6 +1211,18 @@ def _cmd_save(args):
     return 0
 
 
+def _cmd_interview_add(args):
+    result = add_interview(args.task_id, args.items)
+    if result["added"]:
+        detail = "interview: +%d, %s skipped" % (result["added"], _plural(result["skipped"], "duplicate"))
+    else:
+        detail = "interview: unchanged"
+    print("saved %s (%s)" % (result["id"], detail))
+    print("json: %s" % result["json"])
+    print("md:   %s" % result["md"])
+    return 0
+
+
 def _plural(count, noun):
     return "%d %s%s" % (count, noun, "" if count == 1 else "s")
 
@@ -1226,6 +1310,11 @@ def build_parser():
     p = sub.add_parser("show", help="print the rendered Markdown")
     p.add_argument("task_id")
     p.set_defaults(func=_cmd_show)
+
+    p = sub.add_parser("interview-add", help="append interview items to a saved entry")
+    p.add_argument("task_id")
+    p.add_argument("items", help="JSON file: a list of 1 to 5 interview items")
+    p.set_defaults(func=_cmd_interview_add)
 
     p = sub.add_parser("home", help="print the storage root and the temp dir for drafts")
     p.set_defaults(func=_cmd_home)

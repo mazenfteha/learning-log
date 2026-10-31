@@ -378,5 +378,130 @@ class CliTests(StoreTestCase):
         self.assertTrue((self.home / "tmp").is_dir())
 
 
+def entry_no_interview():
+    entry = example()
+    del entry["interview"]
+    return entry
+
+
+def interview_items():
+    return copy.deepcopy(example()["interview"])
+
+
+class InterviewTests(StoreTestCase):
+    def add(self, items, name="items.json", folder=None, task_id="LOY-214"):
+        return store.add_interview(task_id, self.write_draft(items, name, folder), now=NOW)
+
+    def test_add_appends_and_skips_duplicates(self):
+        self.save(entry_no_interview())
+        result = self.add(interview_items()[:2], "i1.json")
+        self.assertEqual((result["status"], result["added"], result["skipped"]), ("updated", 2, 0))
+        result = store.add_interview("loy-214", self.write_draft(interview_items(), "i2.json"), now=NOW)
+        self.assertEqual((result["added"], result["skipped"]), (1, 2))
+        self.assertEqual([i["verdict"] for i in self.stored()["interview"]], ["solid", "missed", "skipped"])
+
+    def test_add_never_overwrites_an_existing_item(self):
+        self.save(entry_no_interview())
+        self.add(interview_items()[:1], "i1.json")
+        changed = interview_items()[:1]
+        changed[0]["verdict"] = "missed"
+        result = self.add(changed, "i2.json")
+        self.assertEqual((result["status"], result["added"]), ("unchanged", 0))
+        self.assertEqual(self.stored()["interview"][0]["verdict"], "solid")
+
+    def test_add_sets_answered_at_when_missing(self):
+        self.save(entry_no_interview())
+        item = interview_items()[0]
+        del item["answered_at"]
+        self.add([item])
+        self.assertEqual(self.stored()["interview"][0]["answered_at"], NOW.isoformat())
+
+    def test_add_bumps_updated_at(self):
+        self.save(entry_no_interview(), now=NOW)
+        later = NOW + dt.timedelta(hours=1)
+        store.add_interview("LOY-214", self.write_draft(interview_items()[:1]), now=later)
+        self.assertEqual(self.stored()["task"]["updated_at"], later.isoformat())
+
+    def test_add_without_entry_fails(self):
+        with self.assertRaises(store.EntryError) as ctx:
+            self.add(interview_items()[:1], task_id="NOPE-1")
+        self.assertIn("save the lesson first", str(ctx.exception))
+
+    def test_add_rejects_empty_list_and_too_many(self):
+        self.save(entry_no_interview())
+        for bad in ([], interview_items() * 2, {"question": "not a list"}):
+            with self.subTest(bad=type(bad).__name__ + str(len(bad))):
+                with self.assertRaises(store.EntryError):
+                    self.add(bad)
+        self.assertNotIn("interview", self.stored())
+
+    def test_invalid_item_is_not_saved_and_draft_kept(self):
+        self.save(entry_no_interview())
+        item = interview_items()[0]
+        item["asker"] = "cto"
+        path = self.write_draft([item], "i.json", store.tmp_dir())
+        with self.assertRaises(store.EntryError) as ctx:
+            store.add_interview("LOY-214", path, now=NOW)
+        self.assertIn("interview[0].asker", str(ctx.exception))
+        self.assertTrue(path.exists())
+        self.assertNotIn("interview", self.stored())
+
+    def test_secret_in_my_answer_is_rejected_without_echoing_it(self):
+        self.save(entry_no_interview())
+        secret = "sk_live_" + "a" * 24
+        item = interview_items()[0]
+        item["my_answer"] = "I called Stripe with " + secret
+        with self.assertRaises(store.EntryError) as ctx:
+            self.add([item])
+        message = str(ctx.exception)
+        self.assertIn("interview[0].my_answer", message)
+        self.assertNotIn(secret, message)
+        self.assertNotIn("interview", self.stored())
+
+    def test_full_save_keeps_interview(self):
+        self.save(entry_no_interview())
+        self.add(interview_items())
+        entry = entry_no_interview()
+        entry["quiz"][0]["question"] = "A new quiz question?"
+        self.save(entry)
+        self.assertEqual(len(self.stored()["interview"]), 3)
+
+    def test_draft_in_tmp_is_removed(self):
+        self.save(entry_no_interview())
+        path = self.write_draft(interview_items()[:1], "i.json", store.tmp_dir())
+        store.add_interview("LOY-214", path, now=NOW)
+        self.assertFalse(path.exists())
+
+    def test_markdown_renders_interview(self):
+        md = self.save(example())["md"].read_text(encoding="utf-8")
+        self.assertIn("## Interview", md)
+        self.assertLess(md.index("## Quiz"), md.index("## Interview"))
+        self.assertIn("**1. Senior asks:**", md)
+        self.assertIn("- **Verdict:** solid", md)
+        self.assertIn("- **My answer:** I didn't know.", md)
+        self.assertIn("**3. Customer asks:**", md)
+        self.assertIn("- **Say it:** Yes, you keep Gold for now.", md)
+        skipped = md[md.index("**3. Customer asks:**"):]
+        self.assertNotIn("My answer", skipped)
+        self.assertNotIn("Feedback", skipped)
+
+    def test_markdown_without_interview_has_no_section(self):
+        md = self.save(entry_no_interview())["md"].read_text(encoding="utf-8")
+        self.assertNotIn("## Interview", md)
+
+    def test_add_rerenders_markdown(self):
+        result = self.save(entry_no_interview())
+        self.add(interview_items()[:1])
+        self.assertIn("## Interview", result["md"].read_text(encoding="utf-8"))
+
+    def test_cli_interview_add(self):
+        self.save(entry_no_interview())
+        result = self.run_cli("interview-add", "LOY-214", str(self.write_draft(interview_items())))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("saved LOY-214 (interview: +3, 0 duplicates skipped)", result.stdout)
+        result = self.run_cli("interview-add", "LOY-214", str(self.write_draft(interview_items())))
+        self.assertIn("saved LOY-214 (interview: unchanged)", result.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

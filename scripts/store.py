@@ -34,6 +34,8 @@ FIRST_INTERVAL_DAYS = 3
 COUNT_LIMITS = {"decisions": (0, 4), "questions": (1, 3), "quiz": (3, 5)}
 # The field that identifies an item when merging, so re-running /log never duplicates it.
 MERGE_KEYS = {"decisions": "title", "questions": "asked", "quiz": "question"}
+# Items that get their own Notion database rows, by the field that identifies them.
+NOTION_ITEM_KEYS = {"decisions": "title", "questions": "asked", "interview": "question"}
 
 LAYERS = ("business_logic", "code", "architecture", "stack")
 RISKS = ("low", "medium", "high")
@@ -937,6 +939,24 @@ def notion_question_properties(question, task_url):
     }
 
 
+def notion_interview_properties(item, task_url):
+    props = {
+        "Question": notion_text(item["question"]),
+        "Asked by": item["asker"],
+        "Topic": item["topic"],
+        "Verdict": item["verdict"],
+        "Answer": _rich(item["answer"]),
+        "Say it": _rich(item["say_it"]),
+        "File": "`%s`" % item["file"].replace("`", "'"),
+        "Task": [task_url],
+    }
+    if item.get("my_answer"):
+        props["My answer"] = _rich(item["my_answer"])
+    if item.get("feedback"):
+        props["Feedback"] = _rich(item["feedback"])
+    return props
+
+
 def notion_task_hash(entry):
     payload = {"properties": notion_task_properties(entry), "content": render_notion_content(entry)}
     return hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
@@ -974,6 +994,18 @@ def notion_ddl(kind, entries=(), tasks_data_source_id=None):
             '"Reversible" CHECKBOX', '"Files" RICH_TEXT',
             "\"Task\" RELATION('%s', DUAL 'Decisions')" % tasks_data_source_id,
         ]
+    elif kind == "interview":
+        columns = [
+            '"Question" TITLE',
+            '"Asked by" SELECT(%s)' % _sql_options(INTERVIEW_ASKERS,
+                                                    {"senior": "blue", "pm": "purple", "customer": "green"}),
+            '"Topic" SELECT(%s)' % _sql_options(INTERVIEW_TOPICS, {"technical": "gray", "product": "orange"}),
+            '"Verdict" SELECT(%s)' % _sql_options(INTERVIEW_VERDICTS,
+                                                   {"solid": "green", "partial": "yellow", "missed": "red"}),
+            '"My answer" RICH_TEXT', '"Feedback" RICH_TEXT', '"Answer" RICH_TEXT', '"Say it" RICH_TEXT',
+            '"File" RICH_TEXT',
+            "\"Task\" RELATION('%s', DUAL 'Interview')" % tasks_data_source_id,
+        ]
     else:
         columns = [
             '"What I asked" TITLE', '"What I should have asked" RICH_TEXT', '"Rating" NUMBER',
@@ -1002,7 +1034,8 @@ def _setup_actions(ws, entries):
             "creation_mode": "draft",
             "pages": [{"properties": {"title": NOTION_PAGE_TITLE}, "icon": "📓", "content": NOTION_PAGE_INTRO}],
         })], ["url"], note="Before creating, search Notion for an existing 'Learning Log' page holding "
-                           "Tasks, Decisions and Questions databases; if one exists, record it instead.")]
+                           "Tasks, Decisions and Questions databases (and Interview, if present); "
+                           "if one exists, record it instead.")]
     if "tasks" not in dbs:
         return [_action("setup:db:tasks", [_call("notion-create-database", {
             "parent": {"type": "page_id", "page_id": notion_id(page["url"])},
@@ -1011,7 +1044,7 @@ def _setup_actions(ws, entries):
         })], ["url", "data_source_id"])]
     actions = []
     tasks_ds = notion_id(dbs["tasks"]["data_source_id"])
-    for kind, title in (("decisions", "Decisions"), ("questions", "Questions")):
+    for kind, title in (("decisions", "Decisions"), ("questions", "Questions"), ("interview", "Interview")):
         if kind not in dbs:
             actions.append(_action("setup:db:" + kind, [_call("notion-create-database", {
                 "parent": {"type": "page_id", "page_id": notion_id(page["url"])},
@@ -1032,10 +1065,10 @@ def _setup_actions(ws, entries):
 
 
 def _pending_items(entry, synced, kind):
-    """The decisions or questions of an entry not yet in Notion, in entry order."""
-    field = MERGE_KEYS[kind]
+    """The decisions, questions or interview items of an entry not yet in Notion, in entry order."""
+    field = NOTION_ITEM_KEYS[kind]
     done = synced.get(kind, {})
-    return [item for item in entry[kind] if _merge_key(item[field]) not in done]
+    return [item for item in entry.get(kind, []) if _merge_key(item[field]) not in done]
 
 
 def notion_plan(task_id=None):
@@ -1050,7 +1083,7 @@ def notion_plan(task_id=None):
         return {"status": "done", "actions": [], "links": links}
 
     actions = _setup_actions(ws, entries)
-    if actions or len(ws["databases"]) < 3:
+    if actions or len(ws["databases"]) < len(NOTION_ITEM_KEYS) + 1:
         return {"status": "todo", "actions": actions, "links": links}
 
     dbs = ws["databases"]
@@ -1077,7 +1110,8 @@ def notion_plan(task_id=None):
             ], ["url"], note="Updating an existing page: record this action's url.")
             action["url"] = url
             actions.append(action)
-        for kind, build in (("decisions", notion_decision_properties), ("questions", notion_question_properties)):
+        for kind, build in (("decisions", notion_decision_properties), ("questions", notion_question_properties),
+                            ("interview", notion_interview_properties)):
             items = _pending_items(entry, synced, kind)
             if items:
                 actions.append(_action("%s:%s" % (kind, tid), [_call("notion-create-pages", {
@@ -1109,7 +1143,7 @@ def notion_record(results):
                 synced = state["entries"].setdefault(entry["task"]["id"], {})
                 synced["page_url"] = result["url"]
                 synced["task_hash"] = notion_task_hash(entry)
-            elif kind in ("decisions", "questions"):
+            elif kind in NOTION_ITEM_KEYS:
                 entry = _entry_for(entries, rest)
                 synced = state["entries"].setdefault(entry["task"]["id"], {})
                 _record_items(entry, synced, kind, result, ref)
@@ -1135,7 +1169,7 @@ def _record_setup(ws, what, result):
     notion_id(url)
     if what == "page":
         ws["page"] = {"url": url}
-    elif what.startswith("db:") and what[3:] in ("tasks", "decisions", "questions"):
+    elif what.startswith("db:") and (what[3:] == "tasks" or what[3:] in NOTION_ITEM_KEYS):
         ds = result.get("data_source_id")
         if not isinstance(ds, str):
             raise EntryError(["expected \"data_source_id\" from the <data-source url=\"collection://...\"> tag"])
@@ -1156,7 +1190,7 @@ def _entry_for(entries, task_id):
 def _record_items(entry, synced, kind, result, ref):
     done = synced.setdefault(kind, {})
     if "existing" in result:
-        # Rebuilding the map from rows already in Notion: {title or asked text: page URL}.
+        # Rebuilding the map from rows already in Notion: {title, asked or question text: page URL}.
         for text, url in result["existing"].items():
             notion_id(url)
             done[_merge_key(text)] = url
@@ -1168,7 +1202,7 @@ def _record_items(entry, synced, kind, result, ref):
                           % (len(pending), "" if len(pending) == 1 else "s")])
     for item, url in zip(pending, urls):
         notion_id(url)
-        done[_merge_key(item[MERGE_KEYS[kind]])] = url
+        done[_merge_key(item[NOTION_ITEM_KEYS[kind]])] = url
 
 
 # ---------------------------------------------------------------- queries

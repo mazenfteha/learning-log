@@ -23,12 +23,12 @@ The `setup:page` action is first-run setup. Before creating anything, search Not
 
 1. **Record the workspace without creating anything:**
    - `setup:page` with the page URL.
-   - `setup:db:<tasks|decisions|questions>` with each database's URL and the `collection://` URL from its `<data-source>` tag.
+   - `setup:db:<tasks|decisions|questions|interview>` with each database's URL and the `collection://` URL from its `<data-source>` tag. Older pages have no Interview database; the next plan creates it.
    - `setup:view:review_due` and `setup:view:tech_debt` with the "Review due" and "Tech debt" views, if they exist.
 2. **Rebuild the entry map**, so nothing is created twice:
    - Query each database's default view with `notion-query-data-sources`, using `mode: "view"`.
    - For each Tasks row whose Task ID matches a local entry, record `task:<id>` with the row URL.
-   - Record that task's decisions as `decisions:<id>` with `{"existing": {"<Decision title>": "<row url>"}}`, using the rows whose Task relation points to that task page. Do the same for questions, keyed by "What I asked".
+   - Record that task's decisions as `decisions:<id>` with `{"existing": {"<Decision title>": "<row url>"}}`, using the rows whose Task relation points to that task page. Do the same for questions, keyed by "What I asked", and for interview rows, keyed by "Question".
 3. **Continue with the normal rounds.** Whatever is still missing is planned then.
 
 ## If something fails

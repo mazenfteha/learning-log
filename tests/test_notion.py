@@ -30,6 +30,7 @@ class NotionTestCase(StoreTestCase):
         store.notion_record({
             "setup:db:decisions": {"url": url(3), "data_source_id": ds(3)},
             "setup:db:questions": {"url": url(4), "data_source_id": ds(4)},
+            "setup:db:interview": {"url": url(5), "data_source_id": ds(5)},
             "setup:view:review_due": {"url": "view://%s" % ("e" * 32)},
         })
         store.notion_record({"setup:view:tech_debt": {"url": "view://%s" % ("f" * 32)}})
@@ -55,15 +56,20 @@ class SetupTests(NotionTestCase):
 
         store.notion_record({"setup:db:tasks": {"url": url(2), "data_source_id": ds(2)}})
         plan = store.notion_plan()
-        self.assertEqual(self.refs(plan), ["setup:db:decisions", "setup:db:questions", "setup:view:review_due"])
+        self.assertEqual(self.refs(plan), ["setup:db:decisions", "setup:db:questions", "setup:db:interview",
+                                            "setup:view:review_due"])
         decisions_ddl = plan["actions"][0]["calls"][0]["arguments"]["schema"]
         self.assertIn("\"Task\" RELATION('00000002000000000000000000000002', DUAL 'Decisions')", decisions_ddl)
-        view = plan["actions"][2]["calls"][0]["arguments"]
+        interview_ddl = plan["actions"][2]["calls"][0]["arguments"]["schema"]
+        self.assertIn("\"Task\" RELATION('00000002000000000000000000000002', DUAL 'Interview')", interview_ddl)
+        self.assertEqual(plan["actions"][2]["calls"][0]["arguments"]["title"], "Interview")
+        view = plan["actions"][3]["calls"][0]["arguments"]
         self.assertEqual(view["configure"], 'FILTER "Review due" <= "today"; SORT BY "Review due" ASC')
 
         store.notion_record({
             "setup:db:decisions": {"url": url(3), "data_source_id": ds(3)},
             "setup:db:questions": {"url": url(4), "data_source_id": ds(4)},
+            "setup:db:interview": {"url": url(5), "data_source_id": ds(5)},
             "setup:view:review_due": {"url": "view://%s" % ("e" * 32)},
         })
         plan = store.notion_plan()
@@ -72,6 +78,24 @@ class SetupTests(NotionTestCase):
                       plan["actions"][0]["calls"][0]["arguments"]["configure"])
 
         store.notion_record({"setup:view:tech_debt": {"url": "view://%s" % ("f" * 32)}})
+        self.assertEqual(self.refs(store.notion_plan()), ["task:LOY-214"])
+
+    def test_existing_three_database_workspace_gets_only_the_interview_database(self):
+        store.notion_record({"setup:page": {"url": url(1)}})
+        store.notion_record({"setup:db:tasks": {"url": url(2), "data_source_id": ds(2)}})
+        store.notion_record({
+            "setup:db:decisions": {"url": url(3), "data_source_id": ds(3)},
+            "setup:db:questions": {"url": url(4), "data_source_id": ds(4)},
+            "setup:view:review_due": {"url": "view://%s" % ("e" * 32)},
+            "setup:view:tech_debt": {"url": "view://%s" % ("f" * 32)},
+        })
+        plan = store.notion_plan()
+        self.assertEqual(self.refs(plan), ["setup:db:interview"])
+        ddl = plan["actions"][0]["calls"][0]["arguments"]["schema"]
+        self.assertIn('"Question" TITLE', ddl)
+        self.assertIn("'missed':red", ddl)
+        self.assertIn("\"Task\" RELATION('00000002000000000000000000000002', DUAL 'Interview')", ddl)
+        store.notion_record({"setup:db:interview": {"url": url(5), "data_source_id": ds(5)}})
         self.assertEqual(self.refs(store.notion_plan()), ["task:LOY-214"])
 
     def test_nothing_to_do_without_entries(self):
@@ -104,7 +128,7 @@ class SyncTests(NotionTestCase):
 
         store.notion_record({"task:LOY-214": {"url": url(10)}})
         plan = store.notion_plan()
-        self.assertEqual(self.refs(plan), ["decisions:LOY-214", "questions:LOY-214"])
+        self.assertEqual(self.refs(plan), ["decisions:LOY-214", "questions:LOY-214", "interview:LOY-214"])
         self.assertEqual(plan["links"], {"LOY-214": url(10)})
         decision_pages = plan["actions"][0]["calls"][0]["arguments"]["pages"]
         self.assertEqual(len(decision_pages), 4)
@@ -121,6 +145,7 @@ class SyncTests(NotionTestCase):
         store.notion_record({
             "decisions:LOY-214": {"urls": [url(20 + i) for i in range(4)]},
             "questions:LOY-214": {"urls": [url(30), url(31)]},
+            "interview:LOY-214": {"urls": [url(40), url(41), url(42)]},
         })
         self.assertEqual(store.notion_plan()["status"], "done")
 
@@ -129,6 +154,7 @@ class SyncTests(NotionTestCase):
         store.notion_record({
             "decisions:LOY-214": {"urls": [url(20 + i) for i in range(4)]},
             "questions:LOY-214": {"urls": [url(30), url(31)]},
+            "interview:LOY-214": {"urls": [url(40), url(41), url(42)]},
         })
         later = example()
         later["task"]["title"] = "Reverse loyalty points on full and partial refunds"
@@ -147,6 +173,54 @@ class SyncTests(NotionTestCase):
         store.notion_record({"task:LOY-214": {"url": url(10)}, "decisions:LOY-214": {"urls": [url(24)]}})
         self.assertEqual(store.notion_plan()["status"], "done")
 
+    def test_interview_rows(self):
+        store.notion_record({"task:LOY-214": {"url": url(10)}})
+        plan = store.notion_plan()
+        action = next(a for a in plan["actions"] if a["ref"] == "interview:LOY-214")
+        args = action["calls"][0]["arguments"]
+        self.assertEqual(args["parent"], {"type": "data_source_id", "data_source_id": store.notion_id(ds(5))})
+        pages = [p["properties"] for p in args["pages"]]
+        self.assertEqual(len(pages), 3)
+        self.assertEqual(pages[0]["Question"],
+                         "Why did you add a ledger row for the refund instead of just lowering the member's balance?")
+        self.assertEqual((pages[0]["Asked by"], pages[0]["Topic"], pages[0]["Verdict"]),
+                         ("senior", "technical", "solid"))
+        self.assertEqual(pages[0]["File"], "`app/Points/PointsBalance.php`")
+        self.assertEqual(pages[0]["Task"], [url(10)])
+        self.assertIn("Say it", pages[0])
+        self.assertNotIn("My answer", pages[1])  # missed with no answer
+        self.assertIn("Feedback", pages[1])
+        self.assertNotIn("My answer", pages[2])  # skipped
+        self.assertNotIn("Feedback", pages[2])
+
+    def test_interview_added_later_does_not_touch_task_page(self):
+        store.notion_record({"task:LOY-214": {"url": url(10)}})
+        store.notion_record({
+            "decisions:LOY-214": {"urls": [url(20 + i) for i in range(4)]},
+            "questions:LOY-214": {"urls": [url(30), url(31)]},
+            "interview:LOY-214": {"urls": [url(40), url(41), url(42)]},
+        })
+        item = dict(example()["interview"][0], question="What happens on a second partial refund?")
+        store.add_interview("LOY-214", self.write_draft([item], "i.json"))
+        plan = store.notion_plan()
+        self.assertEqual(self.refs(plan), ["interview:LOY-214"])
+        store.notion_record({"interview:LOY-214": {"urls": [url(43)]}})
+        self.assertEqual(store.notion_plan()["status"], "done")
+
+    def test_entry_without_interview_plans_no_interview_action(self):
+        entry = example()
+        del entry["interview"]
+        (self.home / "entries" / "loyalty-api" / "LOY-214.json").unlink()
+        self.save(entry)
+        store.notion_record({"task:LOY-214": {"url": url(10)}})
+        self.assertEqual(self.refs(store.notion_plan()), ["decisions:LOY-214", "questions:LOY-214"])
+
+    def test_rebuild_interview_from_existing_rows(self):
+        store.notion_record({"task:LOY-214": {"url": url(10)}})
+        rows = {i["question"]: url(40 + n) for n, i in enumerate(example()["interview"])}
+        store.notion_record({"interview:LOY-214": {"existing": rows}})
+        self.assertEqual(self.refs(store.notion_plan()), ["decisions:LOY-214", "questions:LOY-214"])
+
     def test_record_is_idempotent_and_checks_counts(self):
         store.notion_record({"task:LOY-214": {"url": url(10)}})
         before = store.notion_state_path().read_text(encoding="utf-8")
@@ -161,7 +235,7 @@ class SyncTests(NotionTestCase):
         store.notion_record({"task:LOY-214": {"url": url(10)}})
         titles = {d["title"]: url(20 + i) for i, d in enumerate(example()["decisions"])}
         store.notion_record({"decisions:LOY-214": {"existing": titles}})
-        self.assertEqual(self.refs(store.notion_plan()), ["questions:LOY-214"])
+        self.assertEqual(self.refs(store.notion_plan()), ["questions:LOY-214", "interview:LOY-214"])
 
     def test_record_rejects_bad_input(self):
         with self.assertRaises(store.EntryError) as ctx:

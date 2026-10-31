@@ -46,6 +46,22 @@ Then start a new Claude Code session, or reload the window in VS Code or the des
 
 Running `/log` again on the same task updates the lesson. It never duplicates decisions, questions or quiz items.
 
+## Interview yourself (optional)
+
+Your lead, PM or a customer will ask about the work, and "let me ask Claude" is not a great answer. Right after the work, in the same chat, type **`/learning-log:interview`**. It logs the session if needed, then asks 5 questions about what you just built, one at a time:
+
+> **PM asks:** A customer has a $200 cart but one item is 25 kg. They expected free shipping. What are they charged? (2/5)
+
+Answer in your own words (dig through the code first if you like), say "review this", or say "I don't know". Each reply gets a short review:
+
+> **Partial.** You've got the 25 flat fee. What's missing is why it beats free shipping: the oversize check runs first.
+> **Answer:** … (`shipping.py`)
+> **Say it:** "One item is over 20 kg, so it ships as oversize at a flat 25, which replaces free shipping."
+
+Say "stop" any time. Answers are saved with the lesson (and in Notion), including the ones you skipped, so you can read them before the meeting. This is the one command where you type; `/learning-log:log` stays read-only.
+
+The first time an answer is saved, Claude Code may ask to run `store.py`. Choose "Yes, don't ask again" and it won't ask again in that project.
+
 ## Where lessons are saved
 
 Everything is saved on your machine first:
@@ -66,7 +82,10 @@ The next `/log` creates a private **Learning Log** page in your Notion containin
 - **Tasks:** one page per lesson. The quiz is on the page as toggles; click one to reveal the answer.
 - **Decisions**, with a **Tech debt** view that lists workarounds and deferred decisions.
 - **Questions:** what you asked, and what you should have asked.
+- **Interview:** your `/learning-log:interview` answers, with the verdict, the real answer and the line to say.
 - A **Review due** view showing lessons worth re-reading. Each lesson is flagged 3 days after it's logged.
+
+Already synced before Interview existed? The next sync adds the Interview database to your existing page.
 
 Later runs update that page and also send any older lessons that never reached Notion. Sync is one way: your local JSON is the source of truth, so edits you make in Notion can be overwritten the next time that lesson changes. You can move the Learning Log page anywhere in your workspace without breaking the sync.
 
@@ -117,6 +136,7 @@ If you edit the plugin during a session, run `/reload-plugins`. Before a release
 python3 scripts/store.py list               # every lesson: date, project, title
 python3 scripts/store.py show <task-id>     # print one lesson
 python3 scripts/store.py validate <file>    # check an entry against the schema
+python3 scripts/store.py interview-add <task-id> <items.json>   # append interview answers
 ```
 
 ## Credits

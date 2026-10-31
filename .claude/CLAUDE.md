@@ -8,19 +8,20 @@ Developers ship more than ever with AI coding agents, but the learning stays ins
 
 ## The product in one line
 
-At the end of a session worth remembering, the developer types `/learning-log:log` (or the short `/log` on Claude Code versions that link it). The plugin writes a lesson about that session. The developer only reads it, re-reading it in Notion whenever they like; each lesson ends with a short self-check quiz.
+At the end of a session worth remembering, the developer types `/learning-log:log` (or the short `/log` on Claude Code versions that link it). The plugin writes a lesson about that session. The developer only reads it, re-reading it in Notion whenever they like; each lesson ends with a short self-check quiz. Optionally, right after the work, `/learning-log:interview` grills the developer with 5 questions a senior lead, PM or customer would ask about that session, so they can answer when it counts.
 
 ## Core principles
 
 These decide every trade-off. If a change conflicts with one of them, stop and ask.
 
-1. **Read, no write.** The developer never has to type a lesson, an answer or a score. The most they do is press a key to reveal an answer or tick a checkbox.
+1. **Read, no write.** The developer never has to type a lesson, an answer or a score. The most they do is press a key to reveal an answer or tick a checkbox. One opt-in exception: `/learning-log:interview` is practice where the developer types answers; everything else stays read-only.
 2. **Zero setup.** Installing the plugin and connecting Notion is the whole setup. No tokens to copy, no IDs to paste, no templates to duplicate.
 3. **Specific to the developer's project.** Lessons use real file names, functions, tables and business rules from the session. Never generic trivia.
 4. **Skip what isn't worth it.** Trivial sessions (renames, formatting, typos, copy changes, routine dependency bumps) produce nothing. An empty log is better than a padded one.
 5. **Local first.** Every entry is saved as a JSON file on the developer's machine first. Notion and anything else are views of that data, never the source of truth.
 6. **Never leak secrets.** No API keys, tokens, passwords, `.env` values or customer data in any entry, ever.
 7. **Any stack.** Nothing may depend on a specific language or framework. The inputs are the session transcript and the git diff, which every project has.
+8. **Lightweight and user-friendly.** Pick the option with less setup, shorter output, fewer prompts and less new code. Reuse existing helpers and steps instead of building parallel machinery.
 
 ## Architecture
 
@@ -36,6 +37,7 @@ Coding session (transcript + git diff)
 ```
 
 - **The skill** does the judgment: what happened, what matters, what to ask. It writes one entry JSON.
+- **The interview skill** logs the session through the log skill's steps, then asks one question per turn and saves each reviewed answer with `store.py interview-add`.
 - **`store.py`** does everything that must be exact: validation, saving, de-duplication, rendering Markdown, and review dates. Put logic in the script, not in prompts, whenever it can be deterministic.
 
 ## Repository layout
@@ -51,6 +53,8 @@ learning-log/
 ├── skills/log/
 │   ├── SKILL.md                  # /log
 │   └── notion.md                 # Notion sync steps, loaded only when Notion is connected
+├── skills/interview/
+│   └── SKILL.md                  # /learning-log:interview (reuses the log skill's steps)
 ├── scripts/
 │   └── store.py
 ├── schema/
@@ -61,6 +65,7 @@ learning-log/
 ├── tests/
 │   ├── test_store.py
 │   └── test_notion.py
+├── docs/superpowers/             # design specs and implementation plans
 └── reference/                    # inputs we learned from; not shipped logic
 ```
 
@@ -68,7 +73,7 @@ learning-log/
 
 `schema/entry.schema.json` is the single source of truth for the entry shape. Everything else is built against it. Change it deliberately, update `examples/entry.example.json` in the same change, and keep validation in `store.py` in sync.
 
-An entry has four parts:
+An entry has four parts, plus an optional interview:
 
 **task** (required)
 - `id`: the ticket ID if there is one (Jira, Linear, ClickUp, GitHub issue); otherwise `<project>-<YYYYMMDD>-<short-slug>`
@@ -103,6 +108,13 @@ An entry has four parts:
 - `due`, `interval_days`, `last_reviewed`, `times_reviewed`
 - Only `due` is used: a re-read reminder shown in Notion's "Review due" view. There is no quiz loop (see Phases).
 
+**interview** (optional, appended by `/learning-log:interview` via `store.py interview-add`, 1 to 5 items per call, no limit stored)
+- `question` (in the asker's voice), `asker`: `senior` | `pm` | `customer`, `topic`: `technical` | `product`
+- `verdict`: `solid` | `partial` | `missed` | `skipped`
+- `my_answer` (as typed, or null), `feedback` (to "you"; null only when skipped)
+- `answer` (1 to 3 sentences), `say_it` (1 to 2 sentences in the developer's voice), `file`, `answered_at`
+- Items are append-only by question text: never overwritten, no retries.
+
 Optional: `code` with one short `before`/`after` snippet (under 10 lines each).
 
 ## Storage
@@ -121,6 +133,7 @@ python3 scripts/store.py validate <entry.json>  # validate only, exit non-zero w
 python3 scripts/store.py list [--project P]     # one line per entry: date, project, title, due
 python3 scripts/store.py due [--project P]      # entries due for review today or earlier
 python3 scripts/store.py show <task-id>         # print the rendered Markdown
+python3 scripts/store.py interview-add <task-id> <items.json>  # append interview items to a saved entry
 python3 scripts/store.py home                   # print the storage root and the tmp dir for drafts
 python3 scripts/store.py notion-plan [task-id]  # next Notion MCP calls, with exact arguments, as JSON
 python3 scripts/store.py notion-record <file>   # record the URLs those calls returned
@@ -136,7 +149,7 @@ Notion sync runs in rounds: `notion-plan` → the skill makes the listed calls v
 - **Writing style of entries:** short sentences, plain words, no filler ("This session focused on…"), written in the developer's voice ("I", "my project").
 - **Paths in skills:** the skill finds `store.py` relative to its own base directory (`../../scripts/store.py`). Before relying on any environment variable for the plugin root, check the current Claude Code plugin docs.
 - **Commits:** small and focused, one logical change each, with a clear message.
-- **Releases:** bump `version` in `.claude-plugin/plugin.json` on every release (current: 0.1.1); installs are pinned to it, so `claude plugin update` ignores new commits until it changes. Run `claude plugin validate --strict .` before releasing, then push. Users update with `claude plugin marketplace update learning-log`, then `claude plugin update learning-log@learning-log`, then a new session.
+- **Releases:** bump `version` in `.claude-plugin/plugin.json` on every release (current: 0.2.0); installs are pinned to it, so `claude plugin update` ignores new commits until it changes. Run `claude plugin validate --strict .` before releasing, then push. Users update with `claude plugin marketplace update learning-log`, then `claude plugin update learning-log@learning-log`, then a new session.
 - **Command name:** the skill is `/learning-log:log`. On Claude Code 2.1.211 the short `/log` is not linked to plugin skills (it's sent as plain text), so docs and replies lead with the full name. Plugins load at session start: a session opened before an install or update won't see the change.
 - **Testing the installed plugin:** `claude -p "/learning-log:log"` in any folder runs the installed copy. In an empty session it must reply "Nothing worth logging". Set `LEARNING_LOG_HOME` to a scratch folder for tests so the real log stays clean.
 
@@ -153,7 +166,7 @@ Anti-patterns: restating the diff line by line; generic advice ("write tests"); 
 ## Phases
 
 1. **Local core (done).** Schema, example entry, `store.py` with tests, `/log` skill writing locally. Then tune lesson quality on real sessions.
-2. **Notion (done).** First-run setup creates a "Learning Log" page with three linked databases (Tasks, Decisions, Questions) via the Notion MCP. Upsert by task id. Views for "Review due" and "Tech debt" (decisions of kind `workaround` or `deferred`). Local JSON stays the source of truth.
+2. **Notion (done).** First-run setup creates a "Learning Log" page with linked databases (Tasks, Decisions, Questions, and Interview since 0.2.0; an existing page gets Interview on its next sync) via the Notion MCP. Upsert by task id. Views for "Review due" and "Tech debt" (decisions of kind `workaround` or `deferred`). Local JSON stays the source of truth.
 3. **Review (dropped).** A `/review` quiz loop was planned and dropped: lessons can be re-read in Notion any time, which is enough. Don't rebuild it without asking.
 4. **Package (done).** Plugin manifest, marketplace file, LICENSE, README install steps. Published at github.com/mazenfteha/learning-log; install with `claude plugin marketplace add mazenfteha/learning-log`, then `claude plugin install learning-log@learning-log`.
 5. **Later.** Evals (fires on real work, skips trivial sessions): `claude plugin eval` needs Claude Code 2.1.269+, WSL2 on Windows for Bash-using skills, and can't mock the claude.ai Notion connector. Also a session-end nudge, Cursor and Codex support, the Debrief game on the same data.

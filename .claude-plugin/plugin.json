@@ -1,8 +1,8 @@
 {
   "name": "learning-log",
   "displayName": "Learning Log",
-  "version": "0.1.1",
-  "description": "Turn AI coding sessions into short, project-specific lessons you only read. /log saves each lesson locally as JSON + Markdown and syncs it to Notion.",
+  "version": "0.2.0",
+  "description": "Turn AI coding sessions into short, project-specific lessons you only read. /learning-log:log saves each lesson locally as JSON + Markdown and syncs it to Notion; /learning-log:interview grills you on the session so you can answer your lead, PM or customer.",
   "author": {
     "name": "Mazen Fteha"
   },

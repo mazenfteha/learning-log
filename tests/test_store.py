@@ -158,6 +158,30 @@ class ValidationTests(StoreTestCase):
         entry["code"]["after"] = "\n".join("line %d" % i for i in range(11))
         self.assertError(entry, "code.after: expected at most 10 lines, got 11")
 
+    def test_example_interview_is_valid(self):
+        entry = example()
+        self.assertEqual(len(entry["interview"]), 3)
+        self.assertEqual(store.validate_entry(entry), [])
+
+    def test_entry_without_interview_is_still_valid(self):
+        entry = example()
+        del entry["interview"]
+        self.assertEqual(store.validate_entry(entry), [])
+
+    def test_interview_enums_and_skipped_rules(self):
+        entry = example()
+        entry["interview"][0]["asker"] = "cto"
+        entry["interview"][1]["feedback"] = None
+        entry["interview"][2]["feedback"] = "Should be null"
+        self.assertError(entry, 'interview[0].asker: "cto" is not one of senior, pm, customer',
+                         "interview[1].feedback: required unless the verdict is skipped",
+                         "interview[2].feedback: must be null when the verdict is skipped")
+
+    def test_interview_length_limits(self):
+        entry = example()
+        entry["interview"][0]["say_it"] = "x" * 301
+        self.assertError(entry, "interview[0].say_it")
+
     def test_invalid_entry_is_not_saved(self):
         entry = example()
         entry["task"]["risk"] = "extreme"

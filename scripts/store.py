@@ -38,13 +38,18 @@ LAYERS = ("business_logic", "code", "architecture", "stack")
 RISKS = ("low", "medium", "high")
 DECISION_KINDS = ("product", "architecture", "security", "workaround", "deferred", "process")
 QUIZ_TYPES = ("predict", "why", "where", "trap")
+INTERVIEW_ASKERS = ("senior", "pm", "customer")
+INTERVIEW_TOPICS = ("technical", "product")
+INTERVIEW_VERDICTS = ("solid", "partial", "missed", "skipped")
+# Items per interview-add call. A stored entry has no limit.
+INTERVIEW_ADD_LIMITS = (1, 5)
 
 TASK_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
 PROJECT_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 MAX_SNIPPET_LINES = 10
 
-TOP_FIELDS = ("schema_version", "task", "decisions", "questions", "quiz", "code", "review")
+TOP_FIELDS = ("schema_version", "task", "decisions", "questions", "quiz", "interview", "code", "review")
 TASK_FIELDS = (
     "id", "title", "project", "repo", "branch", "stack", "layers", "risk",
     "how_it_works", "surprised_me", "would_bite_again", "created_at", "updated_at",
@@ -56,6 +61,9 @@ TASK_REQUIRED = (
 DECISION_FIELDS = ("title", "chosen", "rejected", "why", "kind", "reversible", "files", "impact")
 QUESTION_FIELDS = ("asked", "should_have_asked", "rating", "feedback")
 QUIZ_FIELDS = ("type", "question", "answer", "file")
+INTERVIEW_FIELDS = ("question", "asker", "topic", "verdict", "my_answer", "feedback",
+                    "answer", "say_it", "file", "answered_at")
+INTERVIEW_REQUIRED = INTERVIEW_FIELDS[:-1]
 CODE_FIELDS = ("file", "before", "after", "note")
 REVIEW_FIELDS = ("due", "interval_days", "last_reviewed", "times_reviewed")
 
@@ -164,6 +172,13 @@ def validate_entry(data, mode="input"):
         for i, item in enumerate(items):
             check(item, "%s[%d]" % (key, i), errors)
 
+    if "interview" in data:
+        if isinstance(data["interview"], list):
+            for i, item in enumerate(data["interview"]):
+                _check_interview_item(item, "interview[%d]" % i, errors)
+        else:
+            errors.append("interview: expected a list")
+
     if "code" in data:
         _check_code(data["code"], errors)
     if "review" in data:
@@ -263,6 +278,29 @@ def _check_quiz_item(item, path, errors):
         _check_text(item["answer"], path + ".answer", errors, max_len=500)
     if "file" in item:
         _check_text(item["file"], path + ".file", errors)
+
+
+def _check_interview_item(item, path, errors):
+    if not _check_keys(item, path, INTERVIEW_FIELDS, INTERVIEW_REQUIRED, errors):
+        return
+    for key, choices in (("asker", INTERVIEW_ASKERS), ("topic", INTERVIEW_TOPICS), ("verdict", INTERVIEW_VERDICTS)):
+        if key in item:
+            _check_enum(item[key], "%s.%s" % (path, key), choices, errors)
+    for key, max_len in (("question", 300), ("answer", 500), ("say_it", 300), ("file", None)):
+        if key in item:
+            _check_text(item[key], "%s.%s" % (path, key), errors, max_len=max_len)
+    skipped = item.get("verdict") == "skipped"
+    for key, max_len in (("my_answer", 2000), ("feedback", 600)):
+        value = item.get(key)
+        if value is None:
+            if key == "feedback" and "feedback" in item and not skipped:
+                errors.append("%s.feedback: required unless the verdict is skipped" % path)
+        elif skipped:
+            errors.append("%s.%s: must be null when the verdict is skipped" % (path, key))
+        else:
+            _check_text(value, "%s.%s" % (path, key), errors, max_len=max_len)
+    if "answered_at" in item:
+        _check_datetime(item["answered_at"], path + ".answered_at", errors)
 
 
 def _check_code(code, errors):
@@ -531,7 +569,8 @@ def _without_updated_at(entry):
 def canonical(entry):
     """Order keys like the schema so stored files diff cleanly."""
     orders = {"task": TASK_FIELDS, "code": CODE_FIELDS, "review": REVIEW_FIELDS}
-    item_orders = {"decisions": DECISION_FIELDS, "questions": QUESTION_FIELDS, "quiz": QUIZ_FIELDS}
+    item_orders = {"decisions": DECISION_FIELDS, "questions": QUESTION_FIELDS, "quiz": QUIZ_FIELDS,
+                   "interview": INTERVIEW_FIELDS}
     out = {}
     for key in TOP_FIELDS:
         if key not in entry:

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Learning Log entry",
-  "description": "One lesson from one coding task. Written by the /log skill, saved by scripts/store.py. Count limits on decisions, questions and quiz apply to each /log run; a stored entry merged over several runs may hold more.",
+  "description": "One lesson from one coding task. Written by the /log skill, saved by scripts/store.py. Count limits on decisions, questions and quiz apply to each /log run; a stored entry merged over several runs may hold more. Interview items are appended by /learning-log:interview (store.py interview-add) and have no limit on a stored entry.",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "task", "decisions", "questions", "quiz"],
@@ -28,6 +28,11 @@
       "minItems": 3,
       "maxItems": 5,
       "items": { "$ref": "#/$defs/quiz_item" }
+    },
+    "interview": {
+      "description": "Optional. Answers from /learning-log:interview.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/interview_item" }
     },
     "review": { "$ref": "#/$defs/review" },
     "code": { "$ref": "#/$defs/code" }
@@ -174,6 +179,47 @@
           "$ref": "#/$defs/text"
         }
       }
+    },
+    "interview_item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["question", "asker", "topic", "verdict", "my_answer", "feedback", "answer", "say_it", "file"],
+      "properties": {
+        "question": {
+          "description": "In the asker's voice.",
+          "allOf": [{ "$ref": "#/$defs/text" }],
+          "maxLength": 300
+        },
+        "asker": { "enum": ["senior", "pm", "customer"] },
+        "topic": { "enum": ["technical", "product"] },
+        "verdict": { "enum": ["solid", "partial", "missed", "skipped"] },
+        "my_answer": {
+          "description": "The developer's reply as typed; null when they didn't know or skipped.",
+          "oneOf": [{ "type": "null" }, { "allOf": [{ "$ref": "#/$defs/text" }], "maxLength": 2000 }]
+        },
+        "feedback": {
+          "description": "What was right and what was missing, addressed to \"you\"; null only when skipped.",
+          "oneOf": [{ "type": "null" }, { "allOf": [{ "$ref": "#/$defs/text" }], "maxLength": 600 }]
+        },
+        "answer": {
+          "description": "The real answer, 1 to 3 sentences.",
+          "allOf": [{ "$ref": "#/$defs/text" }],
+          "maxLength": 500
+        },
+        "say_it": {
+          "description": "1 to 2 sentences in the developer's voice, ready to say in a meeting.",
+          "allOf": [{ "$ref": "#/$defs/text" }],
+          "maxLength": 300
+        },
+        "file": {
+          "description": "The path that proves the answer.",
+          "$ref": "#/$defs/text"
+        },
+        "answered_at": { "$ref": "#/$defs/datetime" }
+      },
+      "if": { "properties": { "verdict": { "const": "skipped" } } },
+      "then": { "properties": { "my_answer": { "type": "null" }, "feedback": { "type": "null" } } },
+      "else": { "properties": { "feedback": { "type": "string" } } }
     },
     "review": {
       "description": "Managed by store.py. The skill never writes it.",

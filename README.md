@@ -60,7 +60,7 @@ Answer in your own words (dig through the code first if you like), say "review t
 
 Say "stop" any time. Answers are saved with the lesson (and in Notion), including the ones you skipped, so you can read them before the meeting. This is the one command where you type; `/learning-log:log` stays read-only.
 
-The first time an answer is saved, Claude Code may ask to run `store.py`. Choose "Yes, don't ask again" and it won't ask again in that project.
+The first time an answer is saved, Claude Code may ask to write the answer file or run `store.py`. Choose "Yes, don't ask again" and it won't ask again in that project.
 
 ## Where lessons are saved
 
